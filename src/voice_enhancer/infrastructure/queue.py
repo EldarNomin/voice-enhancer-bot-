@@ -9,7 +9,15 @@ class RedisJobQueue:
         self.client = client
 
     async def enqueue(self, job_id: str) -> None:
-        await self.client.lpush(self.READY, job_id)
+        # Reconciliation can run repeatedly; enqueue each pending ID only once.
+        # An ID may still be PROCESSING while a failed attempt schedules its retry.
+        await self.client.eval(
+            "if not redis.call('LPOS', KEYS[1], ARGV[1]) then "
+            "return redis.call('LPUSH', KEYS[1], ARGV[1]) end return 0",
+            1,
+            self.READY,
+            job_id,
+        )
 
     async def claim(self, timeout: int = 5) -> str | None:
         value = await self.client.brpoplpush(self.READY, self.PROCESSING, timeout=timeout)

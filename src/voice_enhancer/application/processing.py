@@ -1,3 +1,4 @@
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,7 @@ class MediaProcessingService:
         profile: ProcessingProfile,
         on_remux: Callable[[], Awaitable[None]] | None = None,
     ) -> ProcessedMedia:
+        started = time.monotonic()
         work_dir = source.parent / "work"
         work_dir.mkdir(exist_ok=True)
         working_audio = work_dir / "voice.wav"
@@ -44,7 +46,7 @@ class MediaProcessingService:
             working_audio, profile=profile, output_path=work_dir / "isolated.audio"
         )
         enhanced_audio = work_dir / "enhanced.m4a"
-        dsp = await self.ffmpeg.enhance_audio(isolated.output_path, enhanced_audio, profile)
+        await self.ffmpeg.enhance_audio(isolated.output_path, enhanced_audio, profile)
         if kind is MediaKind.VIDEO:
             if on_remux is not None:
                 await on_remux()
@@ -55,6 +57,6 @@ class MediaProcessingService:
         return ProcessedMedia(
             output,
             isolated.provider_name,
-            isolated.compute_seconds + dsp.compute_seconds,
+            time.monotonic() - started,
             isolated.estimated_cost_usd,
         )

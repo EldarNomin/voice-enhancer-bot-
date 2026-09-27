@@ -23,6 +23,7 @@ from voice_enhancer.infrastructure.ffmpeg import FFmpegProcessor
 from voice_enhancer.infrastructure.providers import select_provider
 from voice_enhancer.infrastructure.queue import RedisJobQueue
 from voice_enhancer.infrastructure.telegram import make_bot
+from voice_enhancer.infrastructure.worker_lock import single_worker
 
 logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
@@ -171,20 +172,22 @@ class MediaWorker:
 
     async def serve(self) -> None:
         await self.queue.recover_processing()
-        for job_id in await self.store.recover_jobs():
+        for job_id in await self.store.recover_jobs(MAX_ATTEMPTS):
             await self.queue.enqueue(job_id)
         last_cleanup = 0.0
+        last_reconcile = 0.0
         while True:
+            if time.monotonic() - last_reconcile >= 30:
+                # Reconcile even under sustained load, not only when Redis is empty.
+                for missing_id in await self.store.queued_ids():
+                    await self.queue.enqueue(missing_id)
+                last_reconcile = time.monotonic()
             if time.monotonic() - last_cleanup >= 300:
                 await cleanup_media(self.store, Path(settings.media_root))
                 last_cleanup = time.monotonic()
             job_id = await self.queue.claim(timeout=5)
             if job_id is not None:
                 await self.process_one(job_id)
-            else:
-                # Repair a database commit that happened just before bot/Redis lost connection.
-                for missing_id in await self.store.queued_ids():
-                    await self.queue.enqueue(missing_id)
 
 
 async def _run() -> None:
@@ -217,7 +220,8 @@ async def _run() -> None:
 
 
 def run() -> None:
-    asyncio.run(_run())
+    with single_worker(Path(settings.media_root)):
+        asyncio.run(_run())
 
 
 if __name__ == "__main__":

@@ -58,6 +58,28 @@ class FFmpegProcessor:
 
     async def extract_audio(self, source: Path, output_path: Path) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        info = await self.probe(source)
+        streams = info.get("streams", [])
+        video = next((s for s in streams if s.get("codec_type") == "video"), None)
+        audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+        alignment: list[str] = []
+        if video is not None and audio is not None:
+            # WAV drops timestamps. Preserve speech's position relative to video
+            # before passing the audio through providers that also discard them.
+            video_start = float(video.get("start_time") or 0)
+            offset = float(audio.get("start_time") or 0) - video_start
+            duration = float(video.get("duration") or 0)
+            if duration <= 0:
+                duration = float(info.get("format", {}).get("duration") or 0) - video_start
+            filters = ["asetpts=PTS-STARTPTS"]
+            if offset > 0:
+                filters.append(f"adelay={round(offset * 48000)}S:all=1")
+            elif offset < 0:
+                filters.extend([f"atrim=start={-offset:.6f}", "asetpts=PTS-STARTPTS"])
+            if duration > 0:
+                filters.extend([f"apad=whole_dur={duration:.6f}", f"atrim=duration={duration:.6f}"])
+            # Convert to 48 kHz before sample-based delay.
+            alignment = ["-af", "aresample=48000," + ",".join(filters)]
         await self._run(
             self.ffmpeg_bin,
             "-hide_banner",
@@ -65,7 +87,10 @@ class FFmpegProcessor:
             "-y",
             "-i",
             str(source),
+            "-map",
+            "0:a:0",
             "-vn",
+            *alignment,
             "-ac",
             "2",
             "-ar",
@@ -133,9 +158,7 @@ class FFmpegProcessor:
             "-c:v",
             "copy",
             "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
+            "copy",
             "-shortest",
             "-movflags",
             "+faststart",

@@ -1,0 +1,8 @@
+services:
+  worker:
+    build:
+      context: .
+      target: deepfilter
+    environment:
+      ENHANCEMENT_PROVIDER: deepfilter
+      DEEPFILTER_BIN: /usr/local/bin/deep-filter

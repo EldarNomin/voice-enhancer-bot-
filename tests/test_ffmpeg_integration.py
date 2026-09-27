@@ -26,6 +26,43 @@ def _binaries() -> tuple[str, str]:
 
 
 @pytest.mark.asyncio
+async def test_delayed_audio_keeps_its_position_and_full_video(tmp_path: Path) -> None:
+    import array
+
+    ffmpeg_bin, ffprobe_bin = _binaries()
+    processor = FFmpegProcessor(ffmpeg_bin, ffprobe_bin)
+    source = tmp_path / "delayed.mp4"
+    await processor._run(
+        ffmpeg_bin, "-v", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=blue:s=320x240:r=25:d=2", "-itsoffset", "0.5", "-f", "lavfi", "-i",
+        "sine=frequency=440:sample_rate=48000:duration=1", "-map", "0:v:0",
+        "-map", "1:a:0", "-c:v", "mpeg4", "-c:a", "aac", str(source),
+    )
+    result = await MediaProcessingService(processor).process(
+        source, kind=MediaKind.VIDEO, profile=profile_for(Preset.NATURAL)
+    )
+    checks = await check_media(processor, source, result.output_path, MediaKind.VIDEO)
+    assert abs(checks["duration_seconds"] - 2) < 0.05
+    pcm = tmp_path / "decoded.pcm"
+    await processor._run(
+        ffmpeg_bin, "-v", "error", "-y", "-i", str(result.output_path), "-vn",
+        "-ac", "1", "-ar", "48000", "-f", "f32le", str(pcm),
+    )
+    samples = array.array("f", pcm.read_bytes())
+    if sys.byteorder != "little":
+        samples.byteswap()
+    first_signal = next(i for i, value in enumerate(samples) if abs(value) > 0.01)
+    assert 0.45 < first_signal / 48000 < 0.55
+    hashes = []
+    for media in (source, result.output_path):
+        hashes.append(await processor._run(
+            ffmpeg_bin, "-v", "error", "-i", str(media), "-map", "0:v:0",
+            "-c", "copy", "-f", "hash", "-hash", "sha256", "-",
+        ))
+    assert hashes[0] == hashes[1]
+
+
+@pytest.mark.asyncio
 async def test_process_timeout_stops_child() -> None:
     processor = FFmpegProcessor(timeout_seconds=0.01)
     with pytest.raises(FFmpegError, match="timed out"):

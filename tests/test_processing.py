@@ -24,7 +24,16 @@ class FakeFFmpeg:
 
 
 @pytest.mark.asyncio
-async def test_video_processing_extracts_enhances_and_remuxes(tmp_path: Path) -> None:
+async def test_video_processing_extracts_enhances_and_remuxes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    clock = iter([10.0, 12.5])
+    monkeypatch.setattr(
+        "voice_enhancer.application.processing.time",
+        SimpleNamespace(monotonic=lambda: next(clock)),
+    )
     ffmpeg = FakeFFmpeg()
     service = MediaProcessingService(ffmpeg)  # type: ignore[arg-type]
     result = await service.process(
@@ -33,7 +42,8 @@ async def test_video_processing_extracts_enhances_and_remuxes(tmp_path: Path) ->
     assert ffmpeg.extracted and ffmpeg.remuxed
     assert result.output_path.name == "enhanced.mp4"
     assert result.provider == "ffmpeg-dsp-baseline"
-    assert result.compute_seconds == 1.25
+    # Includes extraction and remuxing, not just the provider's reported 1.25s.
+    assert result.compute_seconds == 2.5
 
 
 @pytest.mark.asyncio

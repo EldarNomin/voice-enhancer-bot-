@@ -337,7 +337,7 @@ class JobStore:
             )
             return result.rowcount == 1
 
-    async def recover_jobs(self) -> list[str]:
+    async def recover_jobs(self, max_attempts: int = 3) -> list[str]:
         """For the single-worker deployment, retry interrupted work and missing queue entries."""
         interrupted = [
             JobStatus.PROCESSING.value,
@@ -346,6 +346,18 @@ class JobStore:
             JobStatus.FAILED_RETRYABLE.value,
         ]
         async with self.sessions.begin() as session:
+            await session.execute(
+                update(JobRow)
+                .where(
+                    JobRow.status.in_(interrupted + [JobStatus.QUEUED.value]),
+                    JobRow.attempts >= max_attempts,
+                )
+                .values(
+                    status=JobStatus.FAILED_FINAL.value,
+                    error_code="RETRY_LIMIT",
+                    updated_at=utcnow(),
+                )
+            )
             await session.execute(
                 update(JobRow)
                 .where(JobRow.status.in_(interrupted))

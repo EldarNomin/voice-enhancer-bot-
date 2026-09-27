@@ -127,7 +127,7 @@ class DeepFilterNetProvider:
                 process = await asyncio.create_subprocess_exec(
                     self.executable,
                     "--compensate-delay",
-                    "--output-dir",
+                    "-o",
                     temp,
                     str(input_path),
                     stdout=asyncio.subprocess.DEVNULL,
@@ -137,10 +137,15 @@ class DeepFilterNetProvider:
                 raise ProviderError("DeepFilterNet executable is not installed") from error
             try:
                 await asyncio.wait_for(process.wait(), timeout=self.timeout_seconds)
-            except TimeoutError as error:
-                process.kill()
+            except (TimeoutError, asyncio.CancelledError) as error:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
                 await process.wait()
-                raise ProviderError("DeepFilterNet timed out") from error
+                if isinstance(error, TimeoutError):
+                    raise ProviderError("DeepFilterNet timed out") from error
+                raise
             if process.returncode != 0:
                 raise ProviderError(f"DeepFilterNet exited with code {process.returncode}")
             produced = Path(temp) / input_path.name
