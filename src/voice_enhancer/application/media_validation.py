@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from voice_enhancer.i18n import tr
+
 
 class MediaKind(StrEnum):
     VIDEO = "video"
@@ -22,7 +24,9 @@ class MediaMetadata:
 
 
 class MediaValidationError(ValueError):
-    pass
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(tr("ru", code))
 
 
 def validate_media(
@@ -35,12 +39,12 @@ def validate_media(
     suffix = path.suffix.lower()
     allowed = VIDEO_EXTENSIONS if metadata.kind is MediaKind.VIDEO else AUDIO_EXTENSIONS
     if suffix not in allowed:
-        raise MediaValidationError("Формат файла пока не поддерживается.")
+        raise MediaValidationError("unsupported_format")
     if metadata.size_bytes <= 0 or metadata.size_bytes > max_size_bytes:
-        raise MediaValidationError("Размер файла превышает допустимый лимит.")
+        raise MediaValidationError("file_too_large")
     if metadata.duration_seconds <= 0 or metadata.duration_seconds > max_duration_seconds:
-        raise MediaValidationError("Длительность файла должна быть не более 10 минут.")
+        raise MediaValidationError("file_too_long")
     if not metadata.has_audio:
-        raise MediaValidationError("В файле не найдена аудиодорожка.")
+        raise MediaValidationError("no_audio")
     if metadata.kind is MediaKind.VIDEO and not metadata.has_video:
-        raise MediaValidationError("В файле не найдена видеодорожка.")
+        raise MediaValidationError("no_video")

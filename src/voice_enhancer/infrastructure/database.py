@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, UniqueConstraint, select, update
+from sqlalchemy import BigInteger, DateTime, Integer, String, UniqueConstraint, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -28,6 +28,7 @@ class JobRow(Base):
     source_path: Mapped[str] = mapped_column(String(512))
     output_path: Mapped[str | None] = mapped_column(String(512))
     kind: Mapped[str] = mapped_column(String(16))
+    locale: Mapped[str] = mapped_column(String(2), default="ru", server_default="ru")
     preset: Mapped[str | None] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(32), default=JobStatus.CREATED.value)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
@@ -45,6 +46,11 @@ def make_engine(url: str) -> AsyncEngine:
 async def initialize_database(engine: AsyncEngine) -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        if connection.dialect.name == "postgresql":
+            # Existing jobs predate localization and had a Russian interface.
+            await connection.execute(
+                text("ALTER TABLE processing_jobs ADD COLUMN IF NOT EXISTS locale VARCHAR(2) NOT NULL DEFAULT 'ru'")
+            )
 
 
 class JobStore:
@@ -60,6 +66,7 @@ class JobStore:
         message_id: int,
         kind: str,
         source_path: Path,
+        locale: str = "ru",
     ) -> tuple[str, bool]:
         async with self.sessions() as session:
             session.add(
@@ -69,6 +76,7 @@ class JobStore:
                     telegram_user_id=user_id,
                     source_message_id=message_id,
                     kind=kind,
+                    locale=locale,
                     source_path=str(source_path),
                     status=JobStatus.CREATED.value,
                 )

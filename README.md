@@ -6,6 +6,8 @@ Telegram bot for improving speech in short videos and audio, based on [`SPEC.md`
 
 The bot accepts Telegram video, audio, and voice messages, validates metadata, offers four presets, queues processing, and returns a result. PostgreSQL stores job state, Redis moves jobs to the worker, and both services share a media volume. The worker resumes interrupted jobs after restart and removes media after its retention window.
 
+The bot uses Russian when the user's Telegram language is Russian and English otherwise. It saves the language with each job so progress and result messages use the same language. On startup it sets the default English Telegram profile and the Russian-localized name and descriptions. The chosen username is `@voice_enhancer_studio_bot`; create this account in BotFather before starting the service.
+
 The default processing engine is a local FFmpeg DSP baseline. An optional ElevenLabs Voice Isolator adapter is available for listening tests. The production provider has not been selected; S3 storage, A/B preview, billing, and multi-worker coordination remain to be implemented.
 
 ## Local setup

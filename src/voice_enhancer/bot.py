@@ -20,10 +20,11 @@ from voice_enhancer.application.media_validation import (
 )
 from voice_enhancer.config import settings
 from voice_enhancer.domain.profile import Preset
+from voice_enhancer.i18n import normalize_locale, tr
 from voice_enhancer.infrastructure.database import JobStore, make_engine
 from voice_enhancer.infrastructure.ffmpeg import FFmpegProcessor
 from voice_enhancer.infrastructure.queue import RedisJobQueue
-from voice_enhancer.infrastructure.telegram import make_bot
+from voice_enhancer.infrastructure.telegram import configure_profile, make_bot
 
 router = Router()
 ffmpeg = FFmpegProcessor(settings.ffmpeg_bin, settings.ffprobe_bin)
@@ -32,10 +33,8 @@ logger = logging.getLogger(__name__)
 
 @router.message(CommandStart())
 async def start(message: Message) -> None:
-    await message.answer(
-        "🎙 Отправь мне видео, аудио или голосовое.\n"
-        "Я очищу голос, уберу лишний шум и сделаю звучание плотнее и ближе к профессиональному микрофону."
-    )
+    locale = normalize_locale(message.from_user.language_code if message.from_user else None)
+    await message.answer(tr(locale, "start"))
 
 
 def _media_from_message(message: Message) -> tuple[str, str, MediaKind] | None:
@@ -72,22 +71,23 @@ def _preset_keyboard(job_id: str) -> InlineKeyboardMarkup:
 
 @router.message(F.video | F.audio | F.voice | F.document)
 async def receive_media(message: Message, bot: Bot, store: JobStore) -> None:
+    if message.from_user is None:
+        return
+    locale = normalize_locale(message.from_user.language_code)
     media = _media_from_message(message)
     if media is None:
-        await message.answer("Этот формат файла пока не поддерживается.")
-        return
-    if message.from_user is None:
+        await message.answer(tr(locale, "unsupported_format"))
         return
     file_id, suffix, kind = media
     try:
         telegram_file = await bot.get_file(file_id)
         size = telegram_file.file_size or 0
         if size <= 0 or size > settings.max_media_size_bytes:
-            await message.answer("Размер файла превышает допустимый лимит.")
+            await message.answer(tr(locale, "file_too_large"))
             return
     except Exception:
         logger.exception("Could not inspect Telegram file")
-        await message.answer("Не удалось получить файл из Telegram. Попробуй позже.")
+        await message.answer(tr(locale, "telegram_file_error"))
         return
 
     media_root = Path(settings.media_root)
@@ -123,34 +123,34 @@ async def receive_media(message: Message, bot: Bot, store: JobStore) -> None:
                 message_id=message.message_id,
                 kind=kind.value,
                 source_path=target,
+                locale=locale,
             )
             if not created:
                 shutil.rmtree(target_dir)
-                await message.answer("Этот файл уже принят. Выбери стиль в предыдущем сообщении.")
+                await message.answer(tr(locale, "duplicate_file"))
                 return
         except MediaValidationError as error:
-            await message.answer(str(error))
+            await message.answer(tr(locale, error.code))
             return
         except Exception:
             logger.exception("Media validation or storage failed")
             if target_dir.exists():
                 shutil.rmtree(target_dir)
-            await message.answer("Не удалось прочитать файл. Проверь формат и попробуй ещё раз.")
+            await message.answer(tr(locale, "read_error"))
             return
-    await message.answer(
-        "Файл получен. Как обработать голос?", reply_markup=_preset_keyboard(job_id)
-    )
+    await message.answer(tr(locale, "choose_preset"), reply_markup=_preset_keyboard(job_id))
 
 
 @router.callback_query(F.data.startswith("p:"))
 async def process_preset(callback: CallbackQuery, store: JobStore, queue: RedisJobQueue) -> None:
     if callback.data is None:
         return
+    locale = normalize_locale(callback.from_user.language_code)
     try:
         _, job_id, preset_value = callback.data.split(":", 2)
         preset = Preset(preset_value)
     except ValueError:
-        await callback.answer("Неизвестный пресет.", show_alert=True)
+        await callback.answer(tr(locale, "unknown_preset"), show_alert=True)
         return
     status_message_id = (
         callback.message.message_id if isinstance(callback.message, Message) else None
@@ -159,16 +159,16 @@ async def process_preset(callback: CallbackQuery, store: JobStore, queue: RedisJ
         job_id, callback.from_user.id, preset.value, status_message_id
     )
     if not accepted:
-        await callback.answer("Файл уже поставлен в очередь или ссылка устарела.", show_alert=True)
+        await callback.answer(tr(locale, "stale_preset"), show_alert=True)
         return
     try:
         await queue.enqueue(job_id)
     except Exception:
         # The queued row is durable; the worker reconciles jobs missing from Redis.
         logger.exception("Queue unavailable after job %s was committed", job_id)
-    await callback.answer("Поставил в очередь.")
+    await callback.answer(tr(locale, "queued_ack"))
     if isinstance(callback.message, Message):
-        await callback.message.edit_text("Файл в очереди. Скоро пришлю результат.")
+        await callback.message.edit_text(tr(locale, "queued"))
 
 
 async def _run() -> None:
@@ -181,6 +181,7 @@ async def _run() -> None:
     dispatcher["store"] = JobStore(engine)
     dispatcher["queue"] = RedisJobQueue(redis)
     try:
+        await configure_profile(bot)
         await dispatcher.start_polling(bot)
     finally:
         await bot.session.close()

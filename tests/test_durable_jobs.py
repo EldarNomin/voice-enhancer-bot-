@@ -24,13 +24,16 @@ class FakeQueue:
 class FakeBot:
     def __init__(self) -> None:
         self.sent = 0
+        self.captions: list[str] = []
 
     async def send_audio(self, *args, **kwargs):
         self.sent += 1
+        self.captions.append(kwargs["caption"])
         return SimpleNamespace(message_id=123)
 
     async def send_video(self, *args, **kwargs):
         self.sent += 1
+        self.captions.append(kwargs["caption"])
         return SimpleNamespace(message_id=124)
 
 
@@ -87,6 +90,7 @@ async def test_worker_completes_audio_and_ignores_duplicate_delivery(tmp_path: P
             message_id=11,
             kind="audio",
             source_path=tmp_path / "voice.ogg",
+            locale="en",
         )
         await store.queue_for_preset(job_id, user_id=9, preset="natural")
         queue = FakeQueue()
@@ -99,6 +103,7 @@ async def test_worker_completes_audio_and_ignores_duplicate_delivery(tmp_path: P
         assert saved.status == JobStatus.COMPLETED.value
         assert saved.result_message_id == 123
         assert bot.sent == 1
+        assert bot.captions == ["Done! Here is your audio with enhanced voice."]
         assert queue.acknowledged == [job_id, job_id]
     finally:
         await engine.dispose()
@@ -142,6 +147,7 @@ async def test_video_worker_passes_through_remux_state(tmp_path: Path) -> None:
             message_id=12,
             kind="video",
             source_path=tmp_path / "clip.mp4",
+            locale="ru",
         )
         await store.queue_for_preset(job_id, user_id=9, preset="studio")
         bot = FakeBot()
@@ -151,5 +157,6 @@ async def test_video_worker_passes_through_remux_state(tmp_path: Path) -> None:
         assert saved is not None and saved.status == JobStatus.COMPLETED.value
         assert saved.result_message_id == 124
         assert bot.sent == 1
+        assert bot.captions == ["Готово! Видео с обработанным голосом."]
     finally:
         await engine.dispose()

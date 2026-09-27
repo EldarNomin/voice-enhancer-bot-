@@ -12,6 +12,7 @@ from voice_enhancer.application.processing import MediaProcessingService
 from voice_enhancer.config import settings
 from voice_enhancer.domain.job import JobStatus
 from voice_enhancer.domain.profile import Preset, profile_for
+from voice_enhancer.i18n import tr
 from voice_enhancer.infrastructure.cleanup import cleanup_media
 from voice_enhancer.infrastructure.database import JobStore, make_engine
 from voice_enhancer.infrastructure.ffmpeg import FFmpegProcessor
@@ -45,14 +46,14 @@ class MediaWorker:
         assert job is not None
         try:
             kind = MediaKind(job.kind)
-            await self._update_status(job, "Обрабатываю голос…")
+            await self._update_status(job, tr(job.locale, "processing"))
 
             async def mark_remuxing() -> None:
                 if not await self.store.transition(
                     job_id, JobStatus.PROCESSING, JobStatus.REMUXING
                 ):
                     raise RuntimeError("Job state changed while remuxing")
-                await self._update_status(job, "Собираю видео…")
+                await self._update_status(job, tr(job.locale, "remuxing"))
 
             result = await self.processor.process(
                 Path(job.source_path),
@@ -70,14 +71,14 @@ class MediaWorker:
                 message = await self.bot.send_video(
                     job.telegram_chat_id,
                     upload,
-                    caption="Готово! Видео с обработанным голосом.",
+                    caption=tr(job.locale, "video_ready"),
                     request_timeout=3600,
                 )
             else:
                 message = await self.bot.send_audio(
                     job.telegram_chat_id,
                     upload,
-                    caption="Готово! Аудио с обработанным голосом.",
+                    caption=tr(job.locale, "audio_ready"),
                     request_timeout=3600,
                 )
             if not await self.store.transition(
@@ -87,7 +88,7 @@ class MediaWorker:
                 result_message_id=message.message_id,
             ):
                 raise RuntimeError("Job state changed after upload")
-            await self._update_status(job, "Готово! Результат отправлен.")
+            await self._update_status(job, tr(job.locale, "completed"))
             logger.info("Job completed: %s", job_id)
         except Exception:
             logger.exception("Job failed: %s", job_id)
@@ -125,7 +126,7 @@ class MediaWorker:
             await self.queue.enqueue(job_id)
         else:
             await self._update_status(
-                current, "Не удалось обработать файл. Пришли его ещё раз чуть позже."
+                current, tr(current.locale, "failed")
             )
 
     async def serve(self) -> None:
