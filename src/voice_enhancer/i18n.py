@@ -6,6 +6,19 @@ MESSAGES = {
             "🎙 Отправь мне видео, аудио или голосовое.\n"
             "Я очищу голос, уберу лишний шум и сделаю звучание плотнее и ближе к профессиональному микрофону."
         ),
+        "how_button": "Как это работает",
+        "pricing_button": "Тарифы",
+        "how_text": (
+            "Пришли видео, аудио или голосовое сообщение до 10 минут. "
+            "Выбери Natural, Studio, Reels или Podcast — я обработаю звук и верну файл."
+        ),
+        "pricing_soon": "Сейчас обработка доступна без оплаты. Тарифы появятся позже.",
+        "another_preset_button": "🔁 Другой стиль",
+        "new_file_button": "➕ Новый файл",
+        "new_file_prompt": "Пришли новое видео, аудио или голосовое сообщение.",
+        "source_expired": "Исходный файл уже удалён. Пришли его ещё раз.",
+        "reprocess_unavailable": "Этот результат недоступен для повторной обработки.",
+        "data_deleted": "История удалена. Оставшиеся файлы будут очищены автоматически.",
         "unsupported_format": "Этот формат файла пока не поддерживается.",
         "file_too_large": "Размер файла превышает допустимый лимит.",
         "file_too_long": "Длительность файла должна быть не более 10 минут.",
@@ -31,6 +44,19 @@ MESSAGES = {
             "🎙 Send me a video, audio file, or voice message.\n"
             "I'll reduce background noise and make your voice sound fuller and clearer."
         ),
+        "how_button": "How it works",
+        "pricing_button": "Pricing",
+        "how_text": (
+            "Send a video, audio file, or voice message up to 10 minutes long. "
+            "Choose Natural, Studio, Reels, or Podcast and I'll return the processed file."
+        ),
+        "pricing_soon": "Processing is currently available without payment. Pricing is coming later.",
+        "another_preset_button": "🔁 Another style",
+        "new_file_button": "➕ New file",
+        "new_file_prompt": "Send another video, audio file, or voice message.",
+        "source_expired": "The original file has expired. Please send it again.",
+        "reprocess_unavailable": "This result cannot be processed again.",
+        "data_deleted": "Your history was deleted. Remaining files will be cleaned up automatically.",
         "unsupported_format": "This file format is not supported yet.",
         "file_too_large": "The file exceeds the size limit.",
         "file_too_long": "The file must be no longer than 10 minutes.",

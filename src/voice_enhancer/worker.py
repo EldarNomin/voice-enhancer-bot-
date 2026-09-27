@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
+from functools import partial
 from pathlib import Path
 
 from aiogram import Bot
@@ -9,11 +11,13 @@ from redis.asyncio import Redis
 
 from voice_enhancer.application.media_validation import MediaKind
 from voice_enhancer.application.processing import MediaProcessingService
+from voice_enhancer.application.quality import check_media
+from voice_enhancer.bot import result_keyboard
 from voice_enhancer.config import settings
 from voice_enhancer.domain.job import JobStatus
 from voice_enhancer.domain.profile import Preset, profile_for
 from voice_enhancer.i18n import tr
-from voice_enhancer.infrastructure.cleanup import cleanup_media
+from voice_enhancer.infrastructure.cleanup import cleanup_deleted_media, cleanup_media
 from voice_enhancer.infrastructure.database import JobStore, make_engine
 from voice_enhancer.infrastructure.ffmpeg import FFmpegProcessor
 from voice_enhancer.infrastructure.providers import select_provider
@@ -32,20 +36,26 @@ class MediaWorker:
         queue: RedisJobQueue,
         bot: Bot,
         processor: MediaProcessingService,
+        quality_checker: Callable[[Path, Path, MediaKind], Awaitable[dict]] | None = None,
     ) -> None:
         self.store = store
         self.queue = queue
         self.bot = bot
         self.processor = processor
+        self.quality_checker = quality_checker
 
     async def process_one(self, job_id: str) -> None:
         if not await self.store.claim(job_id):
             await self.queue.acknowledge(job_id)
             return
         job = await self.store.get(job_id)
-        assert job is not None
+        if job is None:
+            await self.queue.acknowledge(job_id)
+            await cleanup_deleted_media(self.store, Path(settings.media_root))
+            return
         try:
             kind = MediaKind(job.kind)
+            await self._track("full_processing_started", job)
             await self._update_status(job, tr(job.locale, "processing"))
 
             async def mark_remuxing() -> None:
@@ -61,17 +71,37 @@ class MediaWorker:
                 profile=profile_for(Preset(job.preset)),
                 on_remux=mark_remuxing,
             )
+            if self.quality_checker is not None:
+                checks = await self.quality_checker(Path(job.source_path), result.output_path, kind)
+                logger.info(
+                    "Media quality checked job=%s duration_drift_ms=%s sample_peak_dbfs=%s",
+                    job_id,
+                    checks["duration_drift_ms"],
+                    checks["sample_peak_dbfs"],
+                )
             previous = JobStatus.REMUXING if kind is MediaKind.VIDEO else JobStatus.PROCESSING
             if not await self.store.transition(
                 job_id, previous, JobStatus.UPLOADING, output_path=result.output_path
             ):
                 raise RuntimeError("Job state changed before upload")
+            input_bytes = Path(job.source_path).stat().st_size
+            output_bytes = result.output_path.stat().st_size
+            await self.store.record_cost(
+                job_id,
+                provider=result.provider,
+                provider_cost_usd=result.provider_cost_usd,
+                compute_seconds=result.compute_seconds,
+                storage_bytes=input_bytes + output_bytes,
+                telegram_bytes_in=input_bytes,
+                telegram_bytes_out=output_bytes,
+            )
             upload = FSInputFile(result.output_path, filename=result.output_path.name)
             if kind is MediaKind.VIDEO:
                 message = await self.bot.send_video(
                     job.telegram_chat_id,
                     upload,
                     caption=tr(job.locale, "video_ready"),
+                    reply_markup=result_keyboard(job_id, job.locale),
                     request_timeout=3600,
                 )
             else:
@@ -79,6 +109,7 @@ class MediaWorker:
                     job.telegram_chat_id,
                     upload,
                     caption=tr(job.locale, "audio_ready"),
+                    reply_markup=result_keyboard(job_id, job.locale),
                     request_timeout=3600,
                 )
             if not await self.store.transition(
@@ -89,12 +120,14 @@ class MediaWorker:
             ):
                 raise RuntimeError("Job state changed after upload")
             await self._update_status(job, tr(job.locale, "completed"))
+            await self._track("full_processing_completed", job)
             logger.info("Job completed: %s", job_id)
         except Exception:
             logger.exception("Job failed: %s", job_id)
             await self._handle_failure(job_id, job.attempts)
         finally:
             await self.queue.acknowledge(job_id)
+            await cleanup_deleted_media(self.store, Path(settings.media_root))
 
     async def _update_status(self, job, text: str) -> None:
         if job.status_message_id is None:
@@ -107,6 +140,14 @@ class MediaWorker:
             )
         except Exception:
             logger.exception("Could not update progress message for job %s", job.id)
+
+    async def _track(self, name: str, job) -> None:
+        try:
+            await self.store.record_event(
+                name, job.telegram_user_id, job_id=job.id, event_key=f"{name}:{job.id}"
+            )
+        except Exception:
+            logger.exception("Could not record analytics event %s for job %s", name, job.id)
 
     async def _handle_failure(self, job_id: str, attempts: int) -> None:
         current = await self.store.get(job_id)
@@ -125,9 +166,8 @@ class MediaWorker:
             await self.store.transition(job_id, target, JobStatus.QUEUED)
             await self.queue.enqueue(job_id)
         else:
-            await self._update_status(
-                current, tr(current.locale, "failed")
-            )
+            await self._track("full_processing_failed", current)
+            await self._update_status(current, tr(current.locale, "failed"))
 
     async def serve(self) -> None:
         await self.queue.recover_processing()
@@ -152,18 +192,23 @@ async def _run() -> None:
     engine = make_engine(settings.database_url)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     bot = make_bot(settings)
+    ffmpeg = FFmpegProcessor(
+        settings.ffmpeg_bin, settings.ffprobe_bin, settings.ffmpeg_timeout_seconds
+    )
     try:
         await MediaWorker(
             store=JobStore(engine),
             queue=RedisJobQueue(redis),
             bot=bot,
             processor=MediaProcessingService(
-                FFmpegProcessor(settings.ffmpeg_bin, settings.ffprobe_bin),
+                ffmpeg,
                 provider=select_provider(
                     settings.enhancement_provider,
                     elevenlabs_api_key=settings.elevenlabs_api_key,
+                    deepfilter_bin=settings.deepfilter_bin,
                 ),
             ),
+            quality_checker=partial(check_media, ffmpeg),
         ).serve()
     finally:
         await bot.session.close()

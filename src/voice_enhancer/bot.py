@@ -1,12 +1,13 @@
 import asyncio
 import logging
+import os
 import shutil
 import tempfile
 import uuid
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from redis.asyncio import Redis
 
@@ -19,22 +20,78 @@ from voice_enhancer.application.media_validation import (
     validate_media,
 )
 from voice_enhancer.config import settings
+from voice_enhancer.domain.job import JobStatus
 from voice_enhancer.domain.profile import Preset
 from voice_enhancer.i18n import normalize_locale, tr
+from voice_enhancer.infrastructure.cleanup import cleanup_deleted_media
 from voice_enhancer.infrastructure.database import JobStore, make_engine
 from voice_enhancer.infrastructure.ffmpeg import FFmpegProcessor
 from voice_enhancer.infrastructure.queue import RedisJobQueue
 from voice_enhancer.infrastructure.telegram import configure_profile, make_bot
 
 router = Router()
-ffmpeg = FFmpegProcessor(settings.ffmpeg_bin, settings.ffprobe_bin)
+ffmpeg = FFmpegProcessor(settings.ffmpeg_bin, settings.ffprobe_bin, settings.ffmpeg_timeout_seconds)
 logger = logging.getLogger(__name__)
 
 
+async def _track(
+    store: JobStore,
+    name: str,
+    user_id: int,
+    *,
+    job_id: str | None = None,
+    event_key: str | None = None,
+) -> None:
+    try:
+        await store.record_event(name, user_id, job_id=job_id, event_key=event_key)
+    except Exception:
+        logger.exception("Could not record analytics event %s", name)
+
+
 @router.message(CommandStart())
-async def start(message: Message) -> None:
+async def start(message: Message, store: JobStore) -> None:
     locale = normalize_locale(message.from_user.language_code if message.from_user else None)
-    await message.answer(tr(locale, "start"))
+    await message.answer(tr(locale, "start"), reply_markup=_start_keyboard(locale))
+    if message.from_user is not None:
+        await _track(
+            store,
+            "start",
+            message.from_user.id,
+            event_key=f"start:{message.chat.id}:{message.message_id}",
+        )
+
+
+@router.message(Command("delete_my_data"))
+async def delete_my_data(message: Message, store: JobStore) -> None:
+    if message.from_user is None:
+        return
+    locale = normalize_locale(message.from_user.language_code)
+    await store.request_user_deletion(message.from_user.id)
+    await cleanup_deleted_media(store, Path(settings.media_root))
+    await message.answer(tr(locale, "data_deleted"))
+
+
+def _start_keyboard(locale: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=tr(locale, "how_button"), callback_data="info:how")],
+            [InlineKeyboardButton(text=tr(locale, "pricing_button"), callback_data="info:pricing")],
+        ]
+    )
+
+
+@router.callback_query(F.data == "info:how")
+async def show_how(callback: CallbackQuery) -> None:
+    locale = normalize_locale(callback.from_user.language_code)
+    await callback.answer()
+    if isinstance(callback.message, Message):
+        await callback.message.answer(tr(locale, "how_text"))
+
+
+@router.callback_query(F.data == "info:pricing")
+async def show_pricing(callback: CallbackQuery) -> None:
+    locale = normalize_locale(callback.from_user.language_code)
+    await callback.answer(tr(locale, "pricing_soon"), show_alert=True)
 
 
 def _media_from_message(message: Message) -> tuple[str, str, MediaKind] | None:
@@ -69,6 +126,81 @@ def _preset_keyboard(job_id: str) -> InlineKeyboardMarkup:
     )
 
 
+def result_keyboard(job_id: str, locale: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=tr(locale, "another_preset_button"), callback_data=f"r:{job_id}"
+                )
+            ],
+            [InlineKeyboardButton(text=tr(locale, "new_file_button"), callback_data="new:file")],
+        ]
+    )
+
+
+@router.callback_query(F.data == "new:file")
+async def request_new_file(callback: CallbackQuery) -> None:
+    locale = normalize_locale(callback.from_user.language_code)
+    await callback.answer()
+    if isinstance(callback.message, Message):
+        await callback.message.answer(tr(locale, "new_file_prompt"))
+
+
+@router.callback_query(F.data.startswith("r:"))
+async def reprocess_original(callback: CallbackQuery, store: JobStore) -> None:
+    locale = normalize_locale(callback.from_user.language_code)
+    if callback.data is None:
+        return
+    original_id = callback.data.removeprefix("r:")
+    original = await store.get_owned(original_id, callback.from_user.id)
+    if original is None or original.status != JobStatus.COMPLETED.value:
+        await callback.answer(tr(locale, "reprocess_unavailable"), show_alert=True)
+        return
+    media_root = Path(settings.media_root).resolve()
+    source = Path(original.source_path).resolve()
+    if source.parent != media_root / original.id or not source.is_file():
+        await callback.answer(tr(locale, "source_expired"), show_alert=True)
+        return
+    job_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{original_id}:{callback.id}").hex
+    target_dir = media_root / job_id
+    try:
+        target_dir.mkdir()
+        target = target_dir / source.name
+        try:
+            os.link(source, target)
+        except OSError:
+            await asyncio.to_thread(shutil.copyfile, source, target)
+        created = await store.create_reprocess_pending(
+            job_id=job_id, original=original, source_path=target
+        )
+        if not created:
+            shutil.rmtree(target_dir)
+            await callback.answer(tr(locale, "reprocess_unavailable"), show_alert=True)
+            return
+    except FileExistsError:
+        await callback.answer(tr(locale, "reprocess_unavailable"), show_alert=True)
+        return
+    except Exception:
+        logger.exception("Could not prepare reprocessing for job %s", original_id)
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        await callback.answer(tr(locale, "read_error"), show_alert=True)
+        return
+    await callback.answer()
+    await _track(
+        store,
+        "reprocess_requested",
+        callback.from_user.id,
+        job_id=job_id,
+        event_key=f"reprocess:{job_id}",
+    )
+    if isinstance(callback.message, Message):
+        await callback.message.answer(
+            tr(locale, "choose_preset"), reply_markup=_preset_keyboard(job_id)
+        )
+
+
 @router.message(F.video | F.audio | F.voice | F.document)
 async def receive_media(message: Message, bot: Bot, store: JobStore) -> None:
     if message.from_user is None:
@@ -76,6 +208,12 @@ async def receive_media(message: Message, bot: Bot, store: JobStore) -> None:
     locale = normalize_locale(message.from_user.language_code)
     media = _media_from_message(message)
     if media is None:
+        await _track(
+            store,
+            "media_rejected",
+            message.from_user.id,
+            event_key=f"rejected:{message.chat.id}:{message.message_id}",
+        )
         await message.answer(tr(locale, "unsupported_format"))
         return
     file_id, suffix, kind = media
@@ -83,6 +221,12 @@ async def receive_media(message: Message, bot: Bot, store: JobStore) -> None:
         telegram_file = await bot.get_file(file_id)
         size = telegram_file.file_size or 0
         if size <= 0 or size > settings.max_media_size_bytes:
+            await _track(
+                store,
+                "media_rejected",
+                message.from_user.id,
+                event_key=f"rejected:{message.chat.id}:{message.message_id}",
+            )
             await message.answer(tr(locale, "file_too_large"))
             return
     except Exception:
@@ -130,6 +274,12 @@ async def receive_media(message: Message, bot: Bot, store: JobStore) -> None:
                 await message.answer(tr(locale, "duplicate_file"))
                 return
         except MediaValidationError as error:
+            await _track(
+                store,
+                "media_rejected",
+                message.from_user.id,
+                event_key=f"rejected:{message.chat.id}:{message.message_id}",
+            )
             await message.answer(tr(locale, error.code))
             return
         except Exception:
@@ -138,6 +288,9 @@ async def receive_media(message: Message, bot: Bot, store: JobStore) -> None:
                 shutil.rmtree(target_dir)
             await message.answer(tr(locale, "read_error"))
             return
+    await _track(
+        store, "media_received", message.from_user.id, job_id=job_id, event_key=f"received:{job_id}"
+    )
     await message.answer(tr(locale, "choose_preset"), reply_markup=_preset_keyboard(job_id))
 
 
@@ -161,6 +314,9 @@ async def process_preset(callback: CallbackQuery, store: JobStore, queue: RedisJ
     if not accepted:
         await callback.answer(tr(locale, "stale_preset"), show_alert=True)
         return
+    await _track(
+        store, "preset_selected", callback.from_user.id, job_id=job_id, event_key=f"preset:{job_id}"
+    )
     try:
         await queue.enqueue(job_id)
     except Exception:

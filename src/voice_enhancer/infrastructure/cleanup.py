@@ -1,9 +1,12 @@
+import logging
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from voice_enhancer.domain.job import JobStatus
 from voice_enhancer.infrastructure.database import JobStore
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_job_folder(root: Path, job_id: str) -> Path:
@@ -18,6 +21,7 @@ def _safe_job_folder(root: Path, job_id: str) -> Path:
 async def cleanup_media(store: JobStore, root: Path, now: datetime | None = None) -> None:
     now = now or datetime.now(UTC)
     root = root.resolve()
+    await cleanup_deleted_media(store, root)
     for job_id in await store.expire_pending(now - timedelta(minutes=30)):
         shutil.rmtree(_safe_job_folder(root, job_id), ignore_errors=True)
 
@@ -32,3 +36,16 @@ async def cleanup_media(store: JobStore, root: Path, now: datetime | None = None
             source = Path(job.source_path).resolve()
             if source.parent == folder:
                 source.unlink(missing_ok=True)
+
+
+async def cleanup_deleted_media(store: JobStore, root: Path) -> None:
+    root = root.resolve()
+    for job_id in await store.pending_media_deletions():
+        folder = _safe_job_folder(root, job_id)
+        try:
+            if folder.exists():
+                shutil.rmtree(folder)
+        except OSError:
+            logger.warning("Could not delete media folder for job %s; will retry", job_id)
+            continue
+        await store.acknowledge_media_deletion(job_id)

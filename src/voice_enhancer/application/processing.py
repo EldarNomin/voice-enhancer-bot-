@@ -17,6 +17,7 @@ class ProcessedMedia:
     output_path: Path
     provider: str
     compute_seconds: float
+    provider_cost_usd: float | None = None
 
 
 class MediaProcessingService:
@@ -52,5 +53,8 @@ class MediaProcessingService:
         else:
             output = enhanced_audio
         return ProcessedMedia(
-            output, isolated.provider_name, isolated.compute_seconds + dsp.compute_seconds
+            output,
+            isolated.provider_name,
+            isolated.compute_seconds + dsp.compute_seconds,
+            isolated.estimated_cost_usd,
         )

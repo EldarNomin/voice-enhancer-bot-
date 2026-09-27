@@ -14,15 +14,30 @@ class FFmpegError(RuntimeError):
 class FFmpegProcessor:
     """Metadata inspection, conservative speech DSP, and video remux operations."""
 
-    def __init__(self, ffmpeg_bin: str = "ffmpeg", ffprobe_bin: str = "ffprobe") -> None:
+    def __init__(
+        self, ffmpeg_bin: str = "ffmpeg", ffprobe_bin: str = "ffprobe", timeout_seconds: int = 1800
+    ) -> None:
         self.ffmpeg_bin = ffmpeg_bin
         self.ffprobe_bin = ffprobe_bin
+        self.timeout_seconds = timeout_seconds
 
     async def _run(self, *args: str) -> str:
         process = await asyncio.create_subprocess_exec(
             *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
-        stdout, stderr = await process.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=self.timeout_seconds
+            )
+        except (TimeoutError, asyncio.CancelledError) as error:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            await process.wait()
+            if isinstance(error, TimeoutError):
+                raise FFmpegError("FFmpeg command timed out") from error
+            raise
         if process.returncode:
             detail = stderr.decode(errors="replace")[-2000:]
             raise FFmpegError(f"Command failed ({process.returncode}): {detail}")
@@ -65,7 +80,8 @@ class FFmpegProcessor:
     ) -> EnhancementResult:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         # Values are derived from validated bounded profile fields; no user text enters FFmpeg args.
-        nr = 8 + profile.noise_reduction * 20
+        # afftdn's noise floor accepts -80..-20 dB; all preset values must stay valid.
+        nr = 20 + profile.noise_reduction * 20
         threshold = -18 + profile.compression * 8
         presence = profile.presence * 2.5
         warmth = profile.warmth * 1.5
