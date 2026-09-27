@@ -23,6 +23,7 @@ TRANSITIONS: dict[JobStatus, set[JobStatus]] = {
     JobStatus.QUEUED: {JobStatus.PROCESSING, JobStatus.CANCELLED},
     JobStatus.PROCESSING: {
         JobStatus.REMUXING,
+        JobStatus.UPLOADING,
         JobStatus.COMPLETED,
         JobStatus.FAILED_RETRYABLE,
         JobStatus.FAILED_FINAL,

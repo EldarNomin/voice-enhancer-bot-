@@ -32,15 +32,16 @@ async def test_video_processing_extracts_enhances_and_remuxes(tmp_path: Path) ->
     )
     assert ffmpeg.extracted and ffmpeg.remuxed
     assert result.output_path.name == "enhanced.mp4"
-    assert result.provider == "test-provider"
+    assert result.provider == "ffmpeg-dsp-baseline"
+    assert result.compute_seconds == 1.25
 
 
 @pytest.mark.asyncio
-async def test_audio_processing_does_not_remux(tmp_path: Path) -> None:
+async def test_audio_processing_normalizes_and_does_not_remux(tmp_path: Path) -> None:
     ffmpeg = FakeFFmpeg()
     service = MediaProcessingService(ffmpeg)  # type: ignore[arg-type]
     result = await service.process(
         tmp_path / "voice.ogg", kind=MediaKind.AUDIO, profile=profile_for(Preset.NATURAL)
     )
-    assert not ffmpeg.extracted and not ffmpeg.remuxed
+    assert ffmpeg.extracted and not ffmpeg.remuxed
     assert result.output_path.name == "enhanced.m4a"
