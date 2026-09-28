@@ -6,14 +6,14 @@ Keep the current stack for the private alpha. Python + aiogram 3, SQLAlchemy/asy
 
 | Component | Role and trade-off |
 | --- | --- |
-| aiogram bot | Telegram UI and validated uploads; no domain dependency on Telegram types. Download/probe still runs in handlers, so public launch needs admission/concurrency limits. |
+| aiogram bot | Telegram UI and validated uploads; no domain dependency on Telegram types. Download/probe runs in handlers with shared upload slots and transactional admission quotas. |
 | PostgreSQL | Authoritative job state, claims, events and measured resource use. Unique update IDs and conditional updates prevent duplicate processing. |
 | Redis | Delivery hints for durable database jobs. Atomic deduplication limits repeated reconciliation entries; PostgreSQL repairs missing queue entries. Celery/another queue framework is unnecessary for one worker. |
 | Worker | One process on a shared local Linux volume, protected by an OS file lock before recovery. Recovery has a persistent retry budget. Scaling needs leases/heartbeats rather than resetting every in-progress job. |
 | FFmpeg | Extract, DSP and remux. Audio offsets are preserved when WAV drops timestamps. AAC and video are copied during remux to avoid a second lossy audio encoding. |
 | Provider | FFmpeg baseline, DeepFilterNet CPU or optional ElevenLabs. Do not equate technical validity with better sounding speech. |
 | FastAPI | MAX authenticated webhook with a durable PostgreSQL inbox. `/health` is only liveness; it does not certify worker, database or Telegram readiness. Bound to localhost in Compose. |
-| Storage | Local shared volume is appropriate for one-host alpha. S3, quotas, backups and explicit Telegram-cache retention are release work. |
+| Storage | Local shared volume is appropriate for one-host alpha. Admission quotas and disk reserves are implemented; filesystem quotas, S3, backups and explicit Telegram-cache retention remain release work. |
 
 ## Fixes in this review
 
@@ -36,11 +36,11 @@ Real PostgreSQL migration/claim and Redis queue tests use `TEST_DATABASE_URL` an
 
 1. Live Telegram E2E with Local Bot API: video over 20 MB, voice, reconnect/restart, delete and reprocess. A token/API credentials alone do not prove delivery works.
 2. Human blind listening on real Russian and English recordings, including echo, street noise and music. Existing public-corpus results are reported by the earlier implementation; its ignored media files are not available in a new checkout.
-3. Add admission limits, concurrent upload limits and disk-space reserve checks before public traffic. Up to 2 GB per upload can exhaust a small VPS quickly.
+3. Admission/concurrent-upload limits and disk reserves were added on 2026-09-28. Validate their configured values under deployed load; they cannot reserve filesystem space against unrelated applications. Up to 2 GB per upload can exhaust a small VPS quickly. See [WINDOWS.md](WINDOWS.md).
 4. Delivery is at-least-once around the Telegram-send/database-commit boundary. A crash after a successful send can repeat the result. Telegram send operations have no application-supplied idempotency key; do not promise exactly-once delivery.
 5. User deletion cannot recall an upload already accepted by Telegram. The Bot API cache is separate from application storage and still needs an explicit operational retention policy.
 6. Adopt versioned migrations (Alembic) before shared staging/production. This alpha uses an additive, idempotent initializer; the legacy PostgreSQL test now also upgrades channel/string-ID columns and preserves Telegram IDs.
-7. Preview, payments/pricing, S3 and distributed workers remain unfinished. Profile fields for de-essing, reverb and ambience are not fully implemented. Noise/compression control curves and a second denoising stage after AI still need audio calibration; avoid marketing them as measured improvements.
+7. Preview, payments/pricing, S3 and distributed workers remain unfinished. Profile fields for de-essing, reverb and ambience are not fully implemented. Noise/compression control curves still need listening calibration. A measured comparison now disables repeated denoising after successful AI; see [POSTPROCESSING.md](POSTPROCESSING.md), including its limitations.
 8. Pin container image digests after a successful deployment build; the current local Bot API image tracks `latest`. ARM64 DeepFilterNet checksum is recorded, but its runtime has not been exercised here.
 
 ## Free engines

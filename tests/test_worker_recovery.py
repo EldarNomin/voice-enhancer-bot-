@@ -10,6 +10,7 @@ from voice_enhancer.infrastructure.worker_lock import single_worker
 @pytest.mark.asyncio
 async def test_low_storage_pauses_before_claim_and_keeps_cleanup(tmp_path, monkeypatch):
     import asyncio
+    from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
     from voice_enhancer.infrastructure.admission import AdmissionRejected
@@ -20,6 +21,7 @@ async def test_low_storage_pauses_before_claim_and_keeps_cleanup(tmp_path, monke
     store.queued_ids.return_value = []
     cleanup = AsyncMock()
     monkeypatch.setattr("voice_enhancer.worker.cleanup_media", cleanup)
+    monkeypatch.setattr("voice_enhancer.worker.time", SimpleNamespace(monotonic=lambda: 0.0))
 
     def no_space(_):
         raise AdmissionRejected("storage_busy")

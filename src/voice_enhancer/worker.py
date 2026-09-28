@@ -162,8 +162,10 @@ class MediaWorker:
         await self.queue.recover_processing()
         for job_id in await self.store.recover_jobs(MAX_ATTEMPTS):
             await self.queue.enqueue(job_id)
-        last_cleanup = 0.0
-        last_reconcile = 0.0
+        # monotonic() may be near zero on a freshly booted host. Always perform
+        # initial maintenance before the disk guard can pause new work.
+        last_cleanup = float("-inf")
+        last_reconcile = float("-inf")
         storage_paused = False
         while True:
             if time.monotonic() - last_reconcile >= 30:
