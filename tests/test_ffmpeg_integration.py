@@ -344,7 +344,8 @@ async def test_supported_video_inputs_remux_and_process(
 
 
 @pytest.mark.asyncio
-async def test_dsp_does_not_delay_speech_or_discard_tail(tmp_path: Path) -> None:
+@pytest.mark.parametrize("denoise", [True, False])
+async def test_dsp_does_not_delay_speech_or_discard_tail(tmp_path: Path, denoise: bool) -> None:
     """Regression for the 25 ms afftdn hop delay found with real paired speech."""
     import array
     import math
@@ -364,7 +365,7 @@ async def test_dsp_does_not_delay_speech_or_discard_tail(tmp_path: Path) -> None
         output.setparams((1, 2, sr, 0, "NONE", "not compressed"))
         output.writeframes(original.tobytes())
     result = tmp_path / "result.m4a"
-    await processor.enhance_audio(source, result, profile_for(Preset.NATURAL))
+    await processor.enhance_audio(source, result, profile_for(Preset.NATURAL), denoise=denoise)
     decoded = tmp_path / "decoded.pcm"
     await processor._run(ffmpeg_bin, "-v", "error", "-y", "-i", str(result),
                          "-ar", str(sr), "-ac", "1", "-f", "f32le", str(decoded))

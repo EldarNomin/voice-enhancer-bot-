@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     delete,
+    func,
     select,
     text,
     update,
@@ -19,7 +20,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from voice_enhancer.config import settings
 from voice_enhancer.domain.job import TRANSITIONS, JobStatus
+from voice_enhancer.infrastructure.admission import AdmissionRejected
 
 
 def utcnow() -> datetime:
@@ -151,6 +154,30 @@ class JobStore:
     def __init__(self, engine: AsyncEngine) -> None:
         self.sessions = async_sessionmaker(engine, expire_on_commit=False)
 
+    async def _lock_admission(self, session) -> None:
+        # Serialize admission, not downloads/inference. PostgreSQL owns the cap
+        # across bot/ingress processes; SQLite is only used by serial unit tests.
+        if session.bind.dialect.name == "postgresql":
+            await session.execute(text("SELECT pg_advisory_xact_lock(79421801)"))
+
+    async def _check_capacity(self, session, channel: str, user_id: int) -> None:
+        active = JobRow.status.not_in([
+            JobStatus.COMPLETED.value, JobStatus.FAILED_FINAL.value, JobStatus.CANCELLED.value
+        ])
+        own = await session.scalar(select(func.count()).select_from(JobRow).where(
+            active, JobRow.channel == channel, JobRow.telegram_user_id == user_id
+        ))
+        if own >= settings.max_active_jobs_per_user:
+            raise AdmissionRejected("too_many_jobs")
+        total = await session.scalar(select(func.count()).select_from(JobRow).where(active))
+        if total >= settings.max_active_jobs:
+            raise AdmissionRejected()
+
+    async def check_capacity(self, channel: str, user_id: int) -> None:
+        async with self.sessions.begin() as session:
+            await self._lock_admission(session)
+            await self._check_capacity(session, channel, user_id)
+
     async def create_pending(
         self,
         *,
@@ -164,6 +191,15 @@ class JobStore:
         channel: str = "telegram",
     ) -> tuple[str, bool]:
         async with self.sessions() as session:
+            await self._lock_admission(session)
+            existing = await session.scalar(select(JobRow.id).where(
+                JobRow.channel == channel, JobRow.telegram_chat_id == chat_id,
+                (JobRow.source_message_id == int(message_id) if channel == "telegram"
+                 else JobRow.external_source_id == str(message_id)),
+            ))
+            if existing is not None:
+                return existing, False
+            await self._check_capacity(session, channel, user_id)
             session.add(
                 JobRow(
                     id=job_id,
@@ -218,6 +254,10 @@ class JobStore:
         self, *, job_id: str, original: JobRow, source_path: Path
     ) -> bool:
         async with self.sessions() as session:
+            await self._lock_admission(session)
+            if await session.get(JobRow, job_id) is not None:
+                return False
+            await self._check_capacity(session, original.channel, original.telegram_user_id)
             session.add(
                 JobRow(
                     id=job_id,

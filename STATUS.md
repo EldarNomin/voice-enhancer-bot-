@@ -1,5 +1,22 @@
 # Implementation status
 
+## Pre-messenger hardening (2026-09-28)
+
+Added channel-scoped user/global job admission, cross-process download locks,
+streamed Telegram byte limits, disk headroom checks and low-storage worker pause.
+Quotas include reprocessing and jobs awaiting presets; PostgreSQL serializes final
+admission in one transaction. This remains a single-host deployment, not a distributed
+quota system. Aggregate diagnostics add expiring worker heartbeat without user data.
+
+[Windows setup and offline processing](docs/WINDOWS.md) now have a PowerShell launcher.
+Offline processing runs without network, credentials or messenger services; image
+build still needs internet. Windows parser/command-contract checks are in CI, but
+actual Docker Desktop operation on the user's PC and live messenger delivery remain untested.
+
+[Measured DSP comparison](docs/POSTPROCESSING.md) supports skipping a second denoise
+after successful AI (85/96 STOI improvements). FFmpeg-only and signal-loss fallback
+retain denoising. Human listening and paid ElevenLabs evaluation remain outstanding.
+
 The repository is an offline-testable alpha candidate, not a verified production bot. See `SPEC.md` for the acceptance criteria.
 
 | SPEC criterion | Current evidence | Remaining check |

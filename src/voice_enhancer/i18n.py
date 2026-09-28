@@ -2,6 +2,9 @@
 
 MESSAGES = {
     "ru": {
+        "server_busy": "Сейчас много загрузок. Попробуй чуть позже.",
+        "storage_busy": "Временно не хватает места для обработки. Попробуй позже.",
+        "too_many_jobs": "Сначала дождись завершения текущих заданий или выбери стиль для уже отправленных файлов.",
         "start": (
             "🎙 Отправь мне видео, аудио или голосовое.\n"
             "Я очищу голос, уберу лишний шум и сделаю звучание плотнее и ближе к профессиональному микрофону."
@@ -40,6 +43,9 @@ MESSAGES = {
         "failed": "Не удалось обработать файл. Пришли его ещё раз чуть позже.",
     },
     "en": {
+        "server_busy": "Too many uploads right now. Please try again shortly.",
+        "storage_busy": "Processing storage is temporarily full. Please try again later.",
+        "too_many_jobs": "Wait for current jobs to finish or select a style for files already received.",
         "start": (
             "🎙 Send me a video, audio file, or voice message.\n"
             "I'll reduce background noise and make your voice sound fuller and clearer."

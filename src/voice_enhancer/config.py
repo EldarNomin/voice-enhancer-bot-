@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +27,10 @@ class Settings(BaseSettings):
     deepfilter_bin: str = "deep-filter"
     max_media_duration_seconds: int = 600
     max_media_size_bytes: int = 2 * 1024**3
+    max_active_jobs_per_user: int = Field(default=3, ge=1, le=100)
+    max_active_jobs: int = Field(default=100, ge=1, le=10000)
+    max_concurrent_uploads: int = Field(default=2, ge=1, le=16)
+    min_free_disk_bytes: int = Field(default=1024**3, ge=0)
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
     ffmpeg_timeout_seconds: int = 1800

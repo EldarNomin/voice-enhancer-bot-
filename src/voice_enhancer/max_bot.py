@@ -23,6 +23,11 @@ from voice_enhancer.config import settings
 from voice_enhancer.domain.job import JobStatus
 from voice_enhancer.domain.profile import Preset
 from voice_enhancer.i18n import normalize_locale, tr
+from voice_enhancer.infrastructure.admission import (
+    AdmissionRejected,
+    require_disk_space,
+    upload_slot,
+)
 from voice_enhancer.infrastructure.cleanup import cleanup_deleted_media
 from voice_enhancer.infrastructure.database import JobStore, make_engine
 from voice_enhancer.infrastructure.delivery import max_keyboard, max_presets
@@ -104,6 +109,15 @@ class MaxBot:
     async def receive_media(
         self, message: dict, attachment: dict, user_id: int, chat_id: int, locale: str
     ) -> None:
+        try:
+            with upload_slot(self.root, "max", user_id, settings.max_media_size_bytes):
+                await self._receive_media(message, attachment, user_id, chat_id, locale)
+        except AdmissionRejected as error:
+            await self.client.send(chat_id, tr(locale, error.code))
+
+    async def _receive_media(
+        self, message: dict, attachment: dict, user_id: int, chat_id: int, locale: str
+    ) -> None:
         # Stable identity permits safe replay after a crash between DB commit and reply.
         message_id = str(message["body"]["mid"])
         job_id = uuid.uuid5(uuid.NAMESPACE_URL, f"max:{chat_id}:{message_id}").hex
@@ -112,6 +126,7 @@ class MaxBot:
             if existing.status == JobStatus.CREATED.value:
                 await self.client.send(chat_id, tr(locale, "choose_preset"), [max_presets(job_id)])
             return
+        await self.store.check_capacity("max", user_id)
         attachment_type = attachment["type"]
         suffix = {"video": ".mp4", "audio": ".ogg"}.get(attachment_type)
         if suffix is None:
@@ -156,6 +171,10 @@ class MaxBot:
                     locale=locale,
                     channel="max",
                 )
+        except AdmissionRejected:
+            if target_dir.exists():
+                shutil.rmtree(target_dir)
+            raise
         except MediaValidationError as error:
             await self.client.send(chat_id, tr(locale, error.code))
             return
@@ -173,6 +192,18 @@ class MaxBot:
             await self.client.send(chat_id, tr(locale, "failed"))
 
     async def callback(self, update: dict, locale: str) -> None:
+        callback = update["callback"]
+        if (callback.get("payload") or "").startswith("r:"):
+            try:
+                with upload_slot(self.root, "max", callback["user"]["user_id"],
+                                 settings.max_media_size_bytes):
+                    await self._callback(update, locale)
+            except AdmissionRejected as error:
+                await self.client.answer(callback["callback_id"], tr(locale, error.code))
+        else:
+            await self._callback(update, locale)
+
+    async def _callback(self, update: dict, locale: str) -> None:
         callback = update["callback"]
         callback_id = callback["callback_id"]
         user_id = callback["user"]["user_id"]
@@ -207,6 +238,12 @@ class MaxBot:
             job_id = uuid.uuid5(uuid.NAMESPACE_URL, f"max:{original.id}:{callback_id}").hex
             if await self.store.get_owned(job_id, user_id, channel="max") is None:
                 folder = self.root / job_id
+                try:
+                    await self.store.check_capacity("max", user_id)
+                    require_disk_space(self.root, source.stat().st_size)
+                except AdmissionRejected as error:
+                    await self.client.answer(callback_id, tr(locale, error.code))
+                    return
                 folder.mkdir(exist_ok=True)
                 target = folder / source.name
                 if not target.exists():
@@ -214,9 +251,14 @@ class MaxBot:
                         os.link(source, target)
                     except OSError:
                         await asyncio.to_thread(shutil.copyfile, source, target)
-                await self.store.create_reprocess_pending(
-                    job_id=job_id, original=original, source_path=target
-                )
+                try:
+                    await self.store.create_reprocess_pending(
+                        job_id=job_id, original=original, source_path=target
+                    )
+                except AdmissionRejected as error:
+                    shutil.rmtree(folder)
+                    await self.client.answer(callback_id, tr(locale, error.code))
+                    return
             await self.client.answer(callback_id)
             await self.client.send(chat_id, tr(locale, "choose_preset"), [max_presets(job_id)])
             return

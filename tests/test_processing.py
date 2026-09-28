@@ -78,3 +78,20 @@ async def test_near_silent_ai_result_falls_back_to_original_signal(tmp_path, mon
         source, kind=MediaKind.AUDIO, profile=profile_for(Preset.NATURAL))
     assert result.provider == "deepfilternet-fallback-ffmpeg"
     assert processor.enhance_audio.call_args.args[0] == tmp_path / "work" / "voice.wav"
+    assert processor.enhance_audio.call_args.kwargs.get("denoise", True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["deepfilternet", "gtcrn", "elevenlabs-voice-isolator"])
+async def test_successful_ai_does_not_repeat_noise_suppression(tmp_path, monkeypatch, name):
+    from unittest.mock import AsyncMock
+
+    processor = AsyncMock()
+    provider = AsyncMock()
+    provider.enhance.return_value = EnhancementResult(tmp_path / "isolated.wav", name, 1.0)
+    monkeypatch.setattr("voice_enhancer.application.processing.measure_sample_peak",
+                        AsyncMock(side_effect=[-10.0, -12.0]))
+    await MediaProcessingService(processor, provider).process(
+        tmp_path / "source.wav", kind=MediaKind.AUDIO, profile=profile_for(Preset.NATURAL)
+    )
+    assert processor.enhance_audio.call_args.kwargs == {"denoise": False}

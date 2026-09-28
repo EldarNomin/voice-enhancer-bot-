@@ -15,6 +15,7 @@ from voice_enhancer.config import settings
 from voice_enhancer.domain.job import JobStatus
 from voice_enhancer.domain.profile import Preset, profile_for
 from voice_enhancer.i18n import tr
+from voice_enhancer.infrastructure.admission import AdmissionRejected, require_disk_space
 from voice_enhancer.infrastructure.cleanup import cleanup_deleted_media, cleanup_media
 from voice_enhancer.infrastructure.database import JobStore, make_engine
 from voice_enhancer.infrastructure.delivery import Delivery, MaxDelivery, TelegramDelivery
@@ -163,6 +164,7 @@ class MediaWorker:
             await self.queue.enqueue(job_id)
         last_cleanup = 0.0
         last_reconcile = 0.0
+        storage_paused = False
         while True:
             if time.monotonic() - last_reconcile >= 30:
                 # Reconcile even under sustained load, not only when Redis is empty.
@@ -172,6 +174,17 @@ class MediaWorker:
             if time.monotonic() - last_cleanup >= 300:
                 await cleanup_media(self.store, Path(settings.media_root))
                 last_cleanup = time.monotonic()
+            try:
+                require_disk_space(Path(settings.media_root))
+            except AdmissionRejected:
+                if not storage_paused:
+                    logger.warning("Worker paused: insufficient media storage")
+                storage_paused = True
+                await asyncio.sleep(5)
+                continue
+            if storage_paused:
+                logger.info("Worker resumed: media storage available")
+                storage_paused = False
             job_id = await self.queue.claim(timeout=5)
             if job_id is not None:
                 await self.process_one(job_id)
@@ -200,7 +213,9 @@ async def _run() -> None:
         settings.ffmpeg_bin, settings.ffprobe_bin, settings.ffmpeg_timeout_seconds
     )
     try:
-        await MediaWorker(
+        from voice_enhancer.diagnostics import heartbeat
+
+        worker = MediaWorker(
             store=JobStore(engine),
             queue=RedisJobQueue(redis),
             bot=bot,
@@ -215,7 +230,10 @@ async def _run() -> None:
                 ),
             ),
             quality_checker=partial(check_media, ffmpeg),
-        ).serve()
+        )
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(heartbeat(redis))
+            tasks.create_task(worker.serve())
     finally:
         if bot is not None:
             await bot.session.close()

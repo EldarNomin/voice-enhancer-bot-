@@ -1,5 +1,7 @@
 # Voice Enhancer Bot
 
+Windows: [setup, offline test, start and safe diagnostics](docs/WINDOWS.md).
+
 Telegram bot for improving speech in short videos and audio, based on [`SPEC.md`](SPEC.md).
 
 Progress against the MVP acceptance criteria is tracked in [`STATUS.md`](STATUS.md).

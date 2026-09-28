@@ -60,7 +60,14 @@ class MediaProcessingService:
                     isolated.compute_seconds, isolated.estimated_cost_usd,
                 )
         enhanced_audio = work_dir / "enhanced.m4a"
-        await self.ffmpeg.enhance_audio(isolated.output_path, enhanced_audio, profile)
+        if isolated.provider_name in {"deepfilternet", "gtcrn", "elevenlabs-voice-isolator"}:
+            # AI already suppressed noise. A second afftdn pass reduced STOI on
+            # the paired corpus; keep EQ/compression/loudness, not repeated denoising.
+            await self.ffmpeg.enhance_audio(
+                isolated.output_path, enhanced_audio, profile, denoise=False
+            )
+        else:
+            await self.ffmpeg.enhance_audio(isolated.output_path, enhanced_audio, profile)
         if kind is MediaKind.VIDEO:
             if on_remux is not None:
                 await on_remux()

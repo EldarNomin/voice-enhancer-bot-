@@ -9,6 +9,8 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from voice_enhancer.config import settings
+from voice_enhancer.infrastructure.admission import AdmissionRejected
 from voice_enhancer.infrastructure.database import JobStore, initialize_database
 from voice_enhancer.infrastructure.queue import RedisJobQueue
 
@@ -58,6 +60,40 @@ async def test_postgres_upgrades_legacy_schema_and_claims_once(tmp_path) -> None
         assert await store.create_reprocess_pending(
             job_id=uuid4().hex, original=original, source_path=tmp_path / "copy.wav"
         )
+    finally:
+        await engine.dispose()
+        async with admin.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        await admin.dispose()
+
+
+@pytest.mark.asyncio
+async def test_postgres_concurrent_admission_never_exceeds_cap(tmp_path, monkeypatch):
+    url = os.getenv("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_DATABASE_URL is not configured")
+    monkeypatch.setattr(settings, "max_active_jobs", 2)
+    schema = "test_" + uuid4().hex
+    admin = create_async_engine(url)
+    engine = create_async_engine(url, connect_args={"server_settings": {"search_path": schema}})
+    try:
+        async with admin.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        await initialize_database(engine)
+        store = JobStore(engine)
+
+        async def admit(index):
+            try:
+                await store.create_pending(
+                    job_id=uuid4().hex, chat_id=index, user_id=index, message_id=index,
+                    kind="audio", source_path=tmp_path / "source.wav",
+                    channel="max" if index % 2 else "telegram",
+                )
+                return True
+            except AdmissionRejected:
+                return False
+
+        assert sum(await asyncio.gather(*(admit(i) for i in range(12)))) == 2
     finally:
         await engine.dispose()
         async with admin.begin() as connection:

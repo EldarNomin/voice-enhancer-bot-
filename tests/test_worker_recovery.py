@@ -7,6 +7,34 @@ from voice_enhancer.infrastructure.database import JobStore, initialize_database
 from voice_enhancer.infrastructure.worker_lock import single_worker
 
 
+@pytest.mark.asyncio
+async def test_low_storage_pauses_before_claim_and_keeps_cleanup(tmp_path, monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from voice_enhancer.infrastructure.admission import AdmissionRejected
+    from voice_enhancer.worker import MediaWorker
+
+    store, queue = AsyncMock(), AsyncMock()
+    store.recover_jobs.return_value = []
+    store.queued_ids.return_value = []
+    cleanup = AsyncMock()
+    monkeypatch.setattr("voice_enhancer.worker.cleanup_media", cleanup)
+
+    def no_space(_):
+        raise AdmissionRejected("storage_busy")
+
+    monkeypatch.setattr("voice_enhancer.worker.require_disk_space", no_space)
+    pause = AsyncMock(side_effect=asyncio.CancelledError)
+    monkeypatch.setattr("voice_enhancer.worker.asyncio.sleep", pause)
+    worker = MediaWorker(store=store, queue=queue, bot=AsyncMock(), processor=AsyncMock())
+    with pytest.raises(asyncio.CancelledError):
+        await worker.serve()
+    queue.claim.assert_not_awaited()
+    cleanup.assert_awaited_once()
+    pause.assert_awaited_once_with(5)
+
+
 def test_second_worker_cannot_reset_active_jobs(tmp_path: Path) -> None:
     with (
         single_worker(tmp_path),

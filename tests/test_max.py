@@ -275,6 +275,22 @@ class FakeMax:
 
 
 @pytest.mark.asyncio
+async def test_max_quota_rejects_before_download(store, tmp_path, monkeypatch):
+    from voice_enhancer.i18n import tr
+
+    monkeypatch.setattr(settings, "max_active_jobs_per_user", 1)
+    client = FakeMax()
+    await store.create_pending(job_id="existing", chat_id=7, user_id=9, message_id="old",
+                               kind="audio", source_path=tmp_path / "old.ogg", channel="max")
+    bot = MaxBot(client, store, None, None, tmp_path)
+    update = event()
+    update["message"]["sender"]["user_id"] = 9
+    await bot.handle(update)
+    assert client.downloads == 0
+    assert client.messages[-1][1] == tr("ru", "too_many_jobs")
+
+
+@pytest.mark.asyncio
 async def test_max_media_to_shared_worker_and_cross_user_callback(store, tmp_path, monkeypatch):
     from voice_enhancer.application.processing import ProcessedMedia
 

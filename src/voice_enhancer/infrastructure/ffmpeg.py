@@ -101,7 +101,8 @@ class FFmpegProcessor:
         )
 
     async def enhance_audio(
-        self, input_path: Path, output_path: Path, profile: ProcessingProfile
+        self, input_path: Path, output_path: Path, profile: ProcessingProfile,
+        *, denoise: bool = True,
     ) -> EnhancementResult:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         # Values are derived from validated bounded profile fields; no user text enters FFmpeg args.
@@ -110,11 +111,15 @@ class FFmpegProcessor:
         threshold = -18 + profile.compression * 8
         presence = profile.presence * 2.5
         warmth = profile.warmth * 1.5
-        filters = (
+        noise_filters = (
             # afftdn has one 25 ms FFT-hop delay. Pad before it so trimming the
             # latency does not discard the end of speech (48 kHz => 1200 samples).
             f"aresample=48000,apad=pad_len=1200,highpass=f=75,afftdn=nf=-{nr:.1f},"
             "atrim=start_sample=1200,asetpts=PTS-STARTPTS,"
+            if denoise else "aresample=48000,highpass=f=75,"
+        )
+        filters = (
+            noise_filters +
             f"equalizer=f=180:t=q:w=1:g={warmth:.2f},"
             f"equalizer=f=3500:t=q:w=1:g={presence:.2f},"
             f"acompressor=threshold={threshold:.1f}dB:ratio=2.5:attack=15:release=120,"

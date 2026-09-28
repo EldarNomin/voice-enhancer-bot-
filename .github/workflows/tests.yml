@@ -8,6 +8,22 @@ permissions:
   contents: read
 
 jobs:
+  windows-script:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Parse Windows PowerShell script
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$pwd/scripts/windows.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count) { throw ($errors | Out-String) }
+          & ./scripts/windows.ps1 -Action Init
+          $before = (Get-FileHash .env).Hash
+          & ./scripts/windows.ps1 -Action Init
+          if ((Get-FileHash .env).Hash -ne $before) { throw 'Init overwrote .env' }
+          & ./scripts/test_windows.ps1
   test:
     runs-on: ubuntu-latest
     strategy:
