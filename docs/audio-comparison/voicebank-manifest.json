@@ -1,0 +1,266 @@
+[
+  {
+    "id": "p232_001",
+    "row": 0,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "65b8952ed9c5efaeac817e5cf7dcb199327d350f76edc1ce834ff478fff00fc7",
+      "noisy": "a02ea7c37099a76ae9823b0fac7f60ac97e3c307ff1a568923ecc574dec90a1a"
+    }
+  },
+  {
+    "id": "p232_041",
+    "row": 36,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "12c8c4ad690fdcfa4e7018c531df5bba14e99ca2d738582b2de3ccfe1af19f06",
+      "noisy": "2792476469a2c8cd521019497f356d56904554dfd145c03641146ca9e70c708a"
+    }
+  },
+  {
+    "id": "p232_077",
+    "row": 72,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "504007bf275a71a0835761a3791fd82d3f34a79177a030136941c7635709aded",
+      "noisy": "b9e40d871e82dc37aafb71eb83d2b5b4ad685eb482a226b40e66c3af6a5457a1"
+    }
+  },
+  {
+    "id": "p232_113",
+    "row": 107,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "a3138fb369684be8a335be73abf1bae1573e0d08a74ff8ab06cea564f23f8797",
+      "noisy": "894b21855697c07efa18f49173a79f4bcb2f2cf81800a0f67901496e92792da6"
+    }
+  },
+  {
+    "id": "p232_151",
+    "row": 143,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "28b0474be0c99c747b4e2602fb8681d6b551e0bcf93e8ade60bfc22e20a3baca",
+      "noisy": "9eddf71aaf3538aaa737f4c6ed23747c36ecc8a6578a0ab0e24bdc57124a1f30"
+    }
+  },
+  {
+    "id": "p232_190",
+    "row": 179,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "a564550d7c0418286561c438d2206739a18b041d572448b62c1927ba9bed5051",
+      "noisy": "c59ed2bf85b87ccf09755cf8257b23789bdcfbabdf57d39daafe6a256511f9de"
+    }
+  },
+  {
+    "id": "p232_229",
+    "row": 215,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "f235f9ecf2796bd5465dce4f93c4192d8e5c7d44857480378575743d56fb159b",
+      "noisy": "81fff0aa9235eb2dacf7f1e6adf71f0315edf9fb8e7d270c22414099f0d8d37b"
+    }
+  },
+  {
+    "id": "p232_266",
+    "row": 250,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "d26a2237b708da01af698f17bd9b65e19b804b6c6b167579ca4c4d3b74636f24",
+      "noisy": "8f3007872fbf468ede99101b1d0b33362f9077c2ad92266faca048b7c7c2c6e1"
+    }
+  },
+  {
+    "id": "p232_302",
+    "row": 286,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "94b65e9bbcdeb4368ee838134233adf9bc4381423cef424e28cb992cc0f3539c",
+      "noisy": "b1dae1bdd2a615b2d75a725641620784f1e895c699779fcec8245396a4565660"
+    }
+  },
+  {
+    "id": "p232_339",
+    "row": 322,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "99e8e2c0f467c5b2e1b093608a166e8653684e811ac064ebea5006fd307d16c4",
+      "noisy": "58f340f588532c0050c3707b874a2012ac39bfb006a29ac7578df75d21d8510f"
+    }
+  },
+  {
+    "id": "p232_377",
+    "row": 358,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "b34c7e79a8bb681a26de436d681c0ad6cd01b4e8aedeb75edc856c23e5578884",
+      "noisy": "0ed1e75f3519a4f2f9b77a53ebb5014ead74c601ecd4da7ffee2837cf8c5bbf3"
+    }
+  },
+  {
+    "id": "p257_002",
+    "row": 394,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "92bd2d845e8f6a662592f201bec056a853e43f90a25238ddd843c8e094d9246e",
+      "noisy": "0327db0bb23648b1943111bfbaa21300b5357cea8189436d9cc42f8337b73cf0"
+    }
+  },
+  {
+    "id": "p257_039",
+    "row": 429,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "883ce06bdc971a55879c01d7334b3db47c3d5d04b3701c47c1023f7692d2239f",
+      "noisy": "3fb85111452ed897cfad9042fd1801c019ef85d270c470065fe9ade7fe6f6321"
+    }
+  },
+  {
+    "id": "p257_075",
+    "row": 465,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "3665882c25d8695e508dcf771b1ab1a70840916e5d3823650446b2e517c8002d",
+      "noisy": "239dc714c9f850a34382b1d9b4fd8fb3aee8b5d9cf736de44578ef3f212fbaef"
+    }
+  },
+  {
+    "id": "p257_111",
+    "row": 501,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "44a33a87fdd55b31c446cd74d28a8ff1e0bda6075ca52dbd548a0f28579c74ee",
+      "noisy": "811c8fb955f573ee6ab7bb86b6edcf2e5f38b62036b314033148266a3ab09b75"
+    }
+  },
+  {
+    "id": "p257_148",
+    "row": 537,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "2356e2c820cda2c65832d5b4397821011541980c4fc6c41b0efc2e5420595b14",
+      "noisy": "2da2b523070bc8621c0ee285f576a4e26b9151f8d2113430e9514ec60c7bb534"
+    }
+  },
+  {
+    "id": "p257_184",
+    "row": 573,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "42bac71504e922f943a615e98882503dc40535467896d584dac9b122194ccc49",
+      "noisy": "d3b7090fedba75a106a84d62b38559d82b902f8afd39599f49cf34a87cdac5e3"
+    }
+  },
+  {
+    "id": "p257_219",
+    "row": 608,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "59450f386ed921a1d6f03dead5911fb45c17971fd59259214954a92a4612554c",
+      "noisy": "3a090b659b991ddb628f6c2d06869dbb6682905044893c6fec0c872e92083ef6"
+    }
+  },
+  {
+    "id": "p257_255",
+    "row": 644,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "474c33ad5a360ee9783f275faa7a8eeb2ef7bf1332aace1dec63c93f5df3a136",
+      "noisy": "91dd3cfedc5ef630400ebf6ce5cff36536c43c7719ab27db8890434f2118f9fa"
+    }
+  },
+  {
+    "id": "p257_291",
+    "row": 680,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "c58a37b6d6b68b851ed528ea3ec972d5d17e131e036f7e8d9bd931a2aa98ba93",
+      "noisy": "204834eb25c9f538559f071315029025441d75fa5b77b674c7f66fc446cb4657"
+    }
+  },
+  {
+    "id": "p257_327",
+    "row": 716,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "169c8755a10794a4b719d01c2da81273bed4893580f0708552c397cb3889ef9c",
+      "noisy": "3ea383fcc621a15352c0064cd96b4cbd4c312a96b32458734eb9a9d69c5cb26f"
+    }
+  },
+  {
+    "id": "p257_362",
+    "row": 751,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "9e359972a664a6a622e9fbbbc68da34c307855651937f0a3ec52a6fcd8ab4d2f",
+      "noisy": "e7a268fec2209d55056bce9398b8e404cfa938b8db3c55c2236a1ff6d5762f1d"
+    }
+  },
+  {
+    "id": "p257_398",
+    "row": 787,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "3f0c6b5500f2d77265fa2de36b0d61de26b69cb9559f1731cdd1acb82edca571",
+      "noisy": "e5f7d91b35cf8651e4ac2969817451b0577577008a6ff2bfc3647614deb993f6"
+    }
+  },
+  {
+    "id": "p257_434",
+    "row": 823,
+    "dataset": "JacobLinCool/VoiceBank-DEMAND-16k",
+    "split": "test",
+    "license": "CC-BY-4.0",
+    "files": {
+      "clean": "1aaa175fb99e9c9e4bd9503828862ca5a282ef333b1d199c37f393ae4fdd06ae",
+      "noisy": "bd3dd34fa21dc52dfb3851d8fa9832bf5a8ef478f4d80f178fa3181dc2bbcd86"
+    }
+  }
+]

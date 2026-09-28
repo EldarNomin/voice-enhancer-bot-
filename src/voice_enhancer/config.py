@@ -7,6 +7,12 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
     bot_token: str = ""
+    max_bot_token: str = ""
+    max_api_base_url: str = "https://platform-api2.max.ru"
+    max_webhook_secret: str = ""
+    max_ca_bundle: str | None = None
+    # Explicit CDN allowlist; never download arbitrary URLs from message bodies.
+    max_media_hosts: str = "max.ru,okcdn.ru,mycdn.me,userapi.com"
     telegram_api_id: str = ""
     telegram_api_hash: str = ""
     database_url: str = "postgresql+asyncpg://voice:voice@postgres:5432/voice"
@@ -16,6 +22,7 @@ class Settings(BaseSettings):
     enhancement_provider: str = "ffmpeg"
     elevenlabs_api_key: str = ""
     glm_api_key: str = ""
+    gtcrn_model: str = "/opt/models/gtcrn_simple.onnx"
     deepfilter_bin: str = "deep-filter"
     max_media_duration_seconds: int = 600
     max_media_size_bytes: int = 2 * 1024**3

@@ -33,6 +33,7 @@ jobs:
       TEST_DATABASE_URL: postgresql+asyncpg://voice:voice@localhost:5432/voice
       TEST_REDIS_URL: redis://localhost:6379/0
       DEEPFILTER_BIN: /tmp/deep-filter
+      GTCRN_MODEL: /tmp/gtcrn_simple.onnx
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -45,15 +46,20 @@ jobs:
       - name: Install FFmpeg package
         run: sudo apt-get install -y ffmpeg
       - name: Install project
-        run: python -m pip install -c requirements.lock -e ".[dev]"
+        run: python -m pip install -c requirements.lock -e ".[dev,gtcrn]"
       - name: Lint
         run: python -m ruff check src tests scripts
       - name: Install pinned DeepFilterNet
         run: python scripts/install_deepfilter.py /tmp/deep-filter
+      - name: Install pinned GTCRN
+        run: python scripts/install_gtcrn.py /tmp/gtcrn_simple.onnx
       - name: Test
         run: python -m pytest -q
       - name: Validate Compose and build the worker image
         run: |
           cp .env.example .env
           docker compose -f docker-compose.yml -f compose.deepfilter.yml config --quiet
+          docker compose -f docker-compose.yml -f compose.max-only.yml --profile max config --quiet
+          docker compose -f docker-compose.yml -f compose.gtcrn.yml --profile max config --quiet
           docker compose -f docker-compose.yml -f compose.deepfilter.yml build worker
+          docker compose -f docker-compose.yml -f compose.gtcrn.yml build worker

@@ -1,5 +1,6 @@
 """Report local prerequisites without printing credentials or configuration values."""
 
+import importlib.util
 import json
 import shutil
 import sys
@@ -22,6 +23,9 @@ def diagnose(settings: Settings) -> dict:
         and bool(settings.elevenlabs_api_key)
         or settings.enhancement_provider == "deepfilter"
         and _executable_exists(settings.deepfilter_bin)
+        or settings.enhancement_provider == "gtcrn"
+        and Path(settings.gtcrn_model).is_file()
+        and importlib.util.find_spec("sherpa_onnx") is not None
     )
     checks = {
         "python_3_12_or_newer": sys.version_info >= (3, 12),
@@ -29,6 +33,8 @@ def diagnose(settings: Settings) -> dict:
         "ffprobe_available": ffprobe,
         "docker_available": docker,
         "bot_token_set": bool(settings.bot_token),
+        "max_bot_token_set": bool(settings.max_bot_token),
+        "max_webhook_secret_set": len(settings.max_webhook_secret) >= 32,
         "telegram_api_id_set": bool(settings.telegram_api_id),
         "telegram_api_hash_set": bool(settings.telegram_api_hash),
         "selected_provider_ready": provider_ready,

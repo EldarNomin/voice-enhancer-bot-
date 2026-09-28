@@ -10,3 +10,4 @@ tmp/
 media/
 .DS_Store
 
+artifacts/

@@ -26,6 +26,9 @@ async def test_postgres_upgrades_legacy_schema_and_claims_once(tmp_path) -> None
             await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
         await initialize_database(engine)
         async with engine.begin() as connection:
+            for column in ("channel", "external_source_id", "external_status_id", "external_result_id"):
+                await connection.execute(text(f"ALTER TABLE processing_jobs DROP COLUMN {column} CASCADE"))
+            await connection.execute(text("ALTER TABLE analytics_events DROP COLUMN channel"))
             await connection.execute(text("ALTER TABLE processing_jobs DROP COLUMN locale"))
             await connection.execute(text("ALTER TABLE processing_jobs DROP COLUMN origin_job_id"))
             await connection.execute(text(
@@ -44,7 +47,14 @@ async def test_postgres_upgrades_legacy_schema_and_claims_once(tmp_path) -> None
         assert results.count(True) == 1
         assert await store.recover_jobs() == [job_id]
         original = await store.get(job_id)
-        assert original.locale == "en"
+        assert original.locale == "en" and original.channel == "telegram"
+        max_id = uuid4().hex
+        assert await store.create_pending(
+            job_id=max_id, chat_id=2**40, user_id=2**41, message_id="mid.external",
+            kind="audio", source_path=tmp_path / "max.ogg", channel="max",
+        ) == (max_id, True)
+        assert await store.get_owned(max_id, 2**41) is None
+        assert await store.get_owned(max_id, 2**41, channel="max") is not None
         assert await store.create_reprocess_pending(
             job_id=uuid4().hex, original=original, source_path=tmp_path / "copy.wav"
         )

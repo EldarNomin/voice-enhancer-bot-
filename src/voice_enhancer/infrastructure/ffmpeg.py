@@ -111,7 +111,10 @@ class FFmpegProcessor:
         presence = profile.presence * 2.5
         warmth = profile.warmth * 1.5
         filters = (
-            f"highpass=f=75,afftdn=nf=-{nr:.1f},"
+            # afftdn has one 25 ms FFT-hop delay. Pad before it so trimming the
+            # latency does not discard the end of speech (48 kHz => 1200 samples).
+            f"aresample=48000,apad=pad_len=1200,highpass=f=75,afftdn=nf=-{nr:.1f},"
+            "atrim=start_sample=1200,asetpts=PTS-STARTPTS,"
             f"equalizer=f=180:t=q:w=1:g={warmth:.2f},"
             f"equalizer=f=3500:t=q:w=1:g={presence:.2f},"
             f"acompressor=threshold={threshold:.1f}dB:ratio=2.5:attack=15:release=120,"

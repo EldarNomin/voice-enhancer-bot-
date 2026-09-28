@@ -103,3 +103,13 @@ src/voice_enhancer/
   worker.py        queued processing and result delivery
 tests/
 ```
+
+
+## MAX (РФ)
+
+Поддерживаются Telegram и MAX с общей очередью и движком обработки. MAX — опциональный
+канал: webhook → PostgreSQL inbox → обработчик сообщений → общая очередь → media worker.
+Токены и права пользователей разделены по каналам. Есть вариант запуска только MAX.
+Подробная настройка, ограничения и проверка: [docs/MAX.md](docs/MAX.md).
+
+Сравнение локальных движков на открытой речи: [docs/AUDIO_COMPARISON.md](docs/AUDIO_COMPARISON.md).

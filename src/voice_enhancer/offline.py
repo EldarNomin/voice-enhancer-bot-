@@ -73,6 +73,7 @@ async def process_file(
         provider_name,
         elevenlabs_api_key=settings.elevenlabs_api_key,
         deepfilter_bin=deepfilter_bin or settings.deepfilter_bin,
+        gtcrn_model=settings.gtcrn_model,
     )
     profile = profile_for(preset)
     profile_changes: dict[str, float] = {}
@@ -106,7 +107,7 @@ def main() -> None:
     parser.add_argument("output", type=Path)
     parser.add_argument("--preset", type=Preset, choices=list(Preset), default=Preset.STUDIO)
     parser.add_argument(
-        "--provider", choices=("ffmpeg", "deepfilter", "elevenlabs"), default="ffmpeg"
+        "--provider", choices=("ffmpeg", "deepfilter", "gtcrn", "elevenlabs"), default="ffmpeg"
     )
     parser.add_argument("--ffmpeg-bin")
     parser.add_argument("--ffprobe-bin")

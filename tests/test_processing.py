@@ -55,3 +55,26 @@ async def test_audio_processing_normalizes_and_does_not_remux(tmp_path: Path) ->
     )
     assert ffmpeg.extracted and not ffmpeg.remuxed
     assert result.output_path.name == "enhanced.m4a"
+
+
+@pytest.mark.asyncio
+async def test_near_silent_ai_result_falls_back_to_original_signal(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from voice_enhancer.application.media_validation import MediaKind
+    from voice_enhancer.application.processing import MediaProcessingService
+    from voice_enhancer.domain.profile import Preset, profile_for
+    from voice_enhancer.infrastructure.providers import EnhancementResult
+
+    processor = AsyncMock()
+    provider = AsyncMock()
+    source = tmp_path / "source.wav"
+    provider.enhance.return_value = EnhancementResult(
+        tmp_path / "work" / "isolated.audio", "deepfilternet", 1.0
+    )
+    monkeypatch.setattr("voice_enhancer.application.processing.measure_sample_peak",
+                        AsyncMock(side_effect=[-31.2, -85.0]))
+    result = await MediaProcessingService(processor, provider).process(
+        source, kind=MediaKind.AUDIO, profile=profile_for(Preset.NATURAL))
+    assert result.provider == "deepfilternet-fallback-ffmpeg"
+    assert processor.enhance_audio.call_args.args[0] == tmp_path / "work" / "voice.wav"

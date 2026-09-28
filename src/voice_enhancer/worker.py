@@ -6,20 +6,20 @@ from functools import partial
 from pathlib import Path
 
 from aiogram import Bot
-from aiogram.types import FSInputFile
 from redis.asyncio import Redis
 
 from voice_enhancer.application.media_validation import MediaKind
 from voice_enhancer.application.processing import MediaProcessingService
 from voice_enhancer.application.quality import check_media
-from voice_enhancer.bot import result_keyboard
 from voice_enhancer.config import settings
 from voice_enhancer.domain.job import JobStatus
 from voice_enhancer.domain.profile import Preset, profile_for
 from voice_enhancer.i18n import tr
 from voice_enhancer.infrastructure.cleanup import cleanup_deleted_media, cleanup_media
 from voice_enhancer.infrastructure.database import JobStore, make_engine
+from voice_enhancer.infrastructure.delivery import Delivery, MaxDelivery, TelegramDelivery
 from voice_enhancer.infrastructure.ffmpeg import FFmpegProcessor
+from voice_enhancer.infrastructure.max_api import MaxClient
 from voice_enhancer.infrastructure.providers import select_provider
 from voice_enhancer.infrastructure.queue import RedisJobQueue
 from voice_enhancer.infrastructure.telegram import make_bot
@@ -35,13 +35,16 @@ class MediaWorker:
         *,
         store: JobStore,
         queue: RedisJobQueue,
-        bot: Bot,
+        bot: Bot | None = None,
+        deliveries: dict[str, Delivery] | None = None,
         processor: MediaProcessingService,
         quality_checker: Callable[[Path, Path, MediaKind], Awaitable[dict]] | None = None,
     ) -> None:
         self.store = store
         self.queue = queue
-        self.bot = bot
+        self.deliveries = dict(deliveries or {})
+        if bot is not None:
+            self.deliveries["telegram"] = TelegramDelivery(bot)
         self.processor = processor
         self.quality_checker = quality_checker
 
@@ -96,28 +99,14 @@ class MediaWorker:
                 telegram_bytes_in=input_bytes,
                 telegram_bytes_out=output_bytes,
             )
-            upload = FSInputFile(result.output_path, filename=result.output_path.name)
-            if kind is MediaKind.VIDEO:
-                message = await self.bot.send_video(
-                    job.telegram_chat_id,
-                    upload,
-                    caption=tr(job.locale, "video_ready"),
-                    reply_markup=result_keyboard(job_id, job.locale),
-                    request_timeout=3600,
-                )
-            else:
-                message = await self.bot.send_audio(
-                    job.telegram_chat_id,
-                    upload,
-                    caption=tr(job.locale, "audio_ready"),
-                    reply_markup=result_keyboard(job_id, job.locale),
-                    request_timeout=3600,
-                )
+            delivery = self.deliveries[job.channel]
+            message_id = await delivery.send_result(job, result.output_path)
             if not await self.store.transition(
                 job_id,
                 JobStatus.UPLOADING,
                 JobStatus.COMPLETED,
-                result_message_id=message.message_id,
+                result_message_id=int(message_id) if job.channel == "telegram" else None,
+                external_result_id=message_id,
             ):
                 raise RuntimeError("Job state changed after upload")
             await self._update_status(job, tr(job.locale, "completed"))
@@ -131,21 +120,19 @@ class MediaWorker:
             await cleanup_deleted_media(self.store, Path(settings.media_root))
 
     async def _update_status(self, job, text: str) -> None:
-        if job.status_message_id is None:
-            return
         try:
-            await self.bot.edit_message_text(
-                text=text,
-                chat_id=job.telegram_chat_id,
-                message_id=job.status_message_id,
-            )
+            await self.deliveries[job.channel].update_status(job, text)
         except Exception:
             logger.exception("Could not update progress message for job %s", job.id)
 
     async def _track(self, name: str, job) -> None:
         try:
             await self.store.record_event(
-                name, job.telegram_user_id, job_id=job.id, event_key=f"{name}:{job.id}"
+                name,
+                job.telegram_user_id,
+                job_id=job.id,
+                event_key=f"{name}:{job.id}",
+                channel=job.channel,
             )
         except Exception:
             logger.exception("Could not record analytics event %s for job %s", name, job.id)
@@ -192,9 +179,23 @@ class MediaWorker:
 
 async def _run() -> None:
     logging.basicConfig(level=settings.log_level)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     engine = make_engine(settings.database_url)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
-    bot = make_bot(settings)
+    bot = make_bot(settings) if settings.bot_token else None
+    max_client = (
+        MaxClient(
+            settings.max_bot_token,
+            base_url=settings.max_api_base_url,
+            ca_bundle=settings.max_ca_bundle,
+            media_hosts=tuple(settings.max_media_hosts.split(",")),
+        )
+        if settings.max_bot_token
+        else None
+    )
+    deliveries = {"max": MaxDelivery(max_client)} if max_client else {}
+    if bot is None and max_client is None:
+        raise ValueError("BOT_TOKEN or MAX_BOT_TOKEN is required")
     ffmpeg = FFmpegProcessor(
         settings.ffmpeg_bin, settings.ffprobe_bin, settings.ffmpeg_timeout_seconds
     )
@@ -203,18 +204,23 @@ async def _run() -> None:
             store=JobStore(engine),
             queue=RedisJobQueue(redis),
             bot=bot,
+            deliveries=deliveries,
             processor=MediaProcessingService(
                 ffmpeg,
                 provider=select_provider(
                     settings.enhancement_provider,
                     elevenlabs_api_key=settings.elevenlabs_api_key,
                     deepfilter_bin=settings.deepfilter_bin,
+                    gtcrn_model=settings.gtcrn_model,
                 ),
             ),
             quality_checker=partial(check_media, ffmpeg),
         ).serve()
     finally:
-        await bot.session.close()
+        if bot is not None:
+            await bot.session.close()
+        if max_client is not None:
+            await max_client.close()
         await redis.aclose()
         await engine.dispose()
 

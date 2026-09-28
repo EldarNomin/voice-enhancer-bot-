@@ -28,3 +28,28 @@ An optional GLM-5.3-Flash text-to-profile adapter now works in the offline comma
 See [`docs/ARCHITECTURE_REVIEW.md`](docs/ARCHITECTURE_REVIEW.md). Local verification: **71 passed, 2 skipped** with real FFmpeg and the official DeepFilterNet 0.5.6 AMD64 binary; skipped cases require live PostgreSQL/Redis. Ruff, dependency consistency and YAML parsing passed. The DeepFilterNet installer checksum was exercised. Docker/service tests are configured in GitHub Actions; their success must be checked separately.
 
 Fixed local API routing, dependency pinning, single-worker enforcement, persistent retry limits, queue deduplication/reconciliation, intermediate media retention, provider cancellation, complete processing-time measurement, and A/V alignment for delayed audio. A real delayed-audio test checks signal onset and identical compressed video hashes. The optional DeepFilterNet Compose override removes the need for an external enhancement API for initial tests. Actual Telegram delivery and perceptual quality are still release gates.
+
+
+## Telegram + MAX and measured audio comparison (2026-09-28)
+
+MAX is implemented as an optional official REST/webhook channel with durable inbox,
+channel-scoped ownership, presets, reprocessing and deletion. The worker delivers to
+either messenger through an adapter; `compose.max-only.yml` supports MAX without
+Telegram credentials. Setup and live-test prerequisites: [docs/MAX.md](docs/MAX.md).
+No live MAX session has been tested: MAX token and HTTPS deployment are not available here.
+
+A new reproducible comparison covers 48 conditions from 30 open recordings, with
+English paired noisy/clean speech and Russian clean/noise/echo variants. FFmpeg,
+DeepFilterNet and GTCRN are measured separately from optional preset DSP. Source
+hashes, raw metrics, licensing and payment recommendation are in
+[docs/AUDIO_COMPARISON.md](docs/AUDIO_COMPARISON.md). The benchmark exposed and fixed
+25 ms DSP latency. A near-silent neural-output guard now falls back to the original
+signal's FFmpeg processing; the report intentionally retains pre-guard measurements.
+GTCRN is an optional CPU provider with a checksum-pinned model and separate Docker
+target, with the explicit mono/16 kHz quality limitation. No automatic engine switch.
+
+Do not buy an ElevenLabs monthly plan yet. The same corpus allows a small metered
+comparison later. Without an ElevenLabs key or human listening ratings, no universal
+quality winner is claimed. Resemble's public demo rejected inference for exhausted
+GPU quota; it has no result in the comparison. GLM payment is not a dependency for
+preset-based processing in either messenger.

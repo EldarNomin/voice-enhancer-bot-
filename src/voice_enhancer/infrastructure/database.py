@@ -32,7 +32,17 @@ class Base(DeclarativeBase):
 
 class JobRow(Base):
     __tablename__ = "processing_jobs"
-    __table_args__ = (UniqueConstraint("telegram_chat_id", "source_message_id"),)
+    __table_args__ = (
+        UniqueConstraint("telegram_chat_id", "source_message_id"),
+        UniqueConstraint(
+            "channel", "telegram_chat_id", "external_source_id", name="uq_job_channel_source"
+        ),
+    )
+
+    channel: Mapped[str] = mapped_column(String(16), default="telegram", server_default="telegram")
+    external_source_id: Mapped[str | None] = mapped_column(String(256))
+    external_status_id: Mapped[str | None] = mapped_column(String(256))
+    external_result_id: Mapped[str | None] = mapped_column(String(256))
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     telegram_chat_id: Mapped[int] = mapped_column(BigInteger)
@@ -79,6 +89,8 @@ class DeletedMediaRow(Base):
 class AnalyticsEventRow(Base):
     __tablename__ = "analytics_events"
 
+    channel: Mapped[str] = mapped_column(String(16), default="telegram", server_default="telegram")
+
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     event_key: Mapped[str | None] = mapped_column(String(128), unique=True)
     event_name: Mapped[str] = mapped_column(String(64))
@@ -92,6 +104,8 @@ def make_engine(url: str) -> AsyncEngine:
 
 
 async def initialize_database(engine: AsyncEngine) -> None:
+    from voice_enhancer.infrastructure import max_inbox  # noqa: F401
+
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
         if connection.dialect.name == "postgresql":
@@ -110,6 +124,28 @@ async def initialize_database(engine: AsyncEngine) -> None:
                 text("ALTER TABLE processing_jobs ALTER COLUMN source_message_id DROP NOT NULL")
             )
 
+            # Additive migration: keep legacy Telegram columns and their original IDs.
+            # MAX mids are strings and must never be coerced to a Telegram bigint.
+            for table in ("processing_jobs", "analytics_events"):
+                await connection.execute(
+                    text(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS "
+                        "channel VARCHAR(16) NOT NULL DEFAULT 'telegram'"
+                    )
+                )
+            for column in ("external_source_id", "external_status_id", "external_result_id"):
+                await connection.execute(
+                    text(
+                        f"ALTER TABLE processing_jobs ADD COLUMN IF NOT EXISTS {column} VARCHAR(256)"
+                    )
+                )
+            await connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_job_channel_source ON "
+                    "processing_jobs(channel, telegram_chat_id, external_source_id)"
+                )
+            )
+
 
 class JobStore:
     def __init__(self, engine: AsyncEngine) -> None:
@@ -121,10 +157,11 @@ class JobStore:
         job_id: str,
         chat_id: int,
         user_id: int,
-        message_id: int,
+        message_id: int | str,
         kind: str,
         source_path: Path,
         locale: str = "ru",
+        channel: str = "telegram",
     ) -> tuple[str, bool]:
         async with self.sessions() as session:
             session.add(
@@ -132,7 +169,9 @@ class JobStore:
                     id=job_id,
                     telegram_chat_id=chat_id,
                     telegram_user_id=user_id,
-                    source_message_id=message_id,
+                    source_message_id=int(message_id) if channel == "telegram" else None,
+                    channel=channel,
+                    external_source_id=str(message_id),
                     kind=kind,
                     locale=locale,
                     source_path=str(source_path),
@@ -147,7 +186,12 @@ class JobStore:
                 existing = await session.scalar(
                     select(JobRow.id).where(
                         JobRow.telegram_chat_id == chat_id,
-                        JobRow.source_message_id == message_id,
+                        JobRow.channel == channel,
+                        (
+                            JobRow.source_message_id == int(message_id)
+                            if channel == "telegram"
+                            else JobRow.external_source_id == str(message_id)
+                        ),
                     )
                 )
                 if existing is None:
@@ -158,10 +202,16 @@ class JobStore:
         async with self.sessions() as session:
             return await session.get(JobRow, job_id)
 
-    async def get_owned(self, job_id: str, user_id: int) -> JobRow | None:
+    async def get_owned(
+        self, job_id: str, user_id: int, *, channel: str = "telegram"
+    ) -> JobRow | None:
         async with self.sessions() as session:
             return await session.scalar(
-                select(JobRow).where(JobRow.id == job_id, JobRow.telegram_user_id == user_id)
+                select(JobRow).where(
+                    JobRow.id == job_id,
+                    JobRow.telegram_user_id == user_id,
+                    JobRow.channel == channel,
+                )
             )
 
     async def create_reprocess_pending(
@@ -171,6 +221,7 @@ class JobStore:
             session.add(
                 JobRow(
                     id=job_id,
+                    channel=original.channel,
                     telegram_chat_id=original.telegram_chat_id,
                     telegram_user_id=original.telegram_user_id,
                     source_message_id=None,
@@ -199,12 +250,14 @@ class JobStore:
         *,
         job_id: str | None = None,
         event_key: str | None = None,
+        channel: str = "telegram",
     ) -> bool:
         async with self.sessions() as session:
             session.add(
                 AnalyticsEventRow(
                     id=uuid4().hex,
-                    event_key=event_key,
+                    event_key=f"{channel}:{event_key}" if event_key else None,
+                    channel=channel,
                     event_name=event_name,
                     telegram_user_id=user_id,
                     job_id=job_id,
@@ -219,21 +272,45 @@ class JobStore:
                     raise
                 return False
 
-    async def events_for_user(self, user_id: int) -> list[AnalyticsEventRow]:
+    async def events_for_user(
+        self, user_id: int, *, channel: str = "telegram"
+    ) -> list[AnalyticsEventRow]:
         async with self.sessions() as session:
             return list(
                 await session.scalars(
-                    select(AnalyticsEventRow).where(AnalyticsEventRow.telegram_user_id == user_id)
+                    select(AnalyticsEventRow).where(
+                        AnalyticsEventRow.telegram_user_id == user_id,
+                        AnalyticsEventRow.channel == channel,
+                    )
                 )
             )
 
-    async def request_user_deletion(self, user_id: int) -> list[str]:
+    async def request_user_deletion(
+        self, user_id: int, *, channel: str = "telegram", before_timestamp: int | None = None
+    ) -> list[str]:
         async with self.sessions.begin() as session:
+            if channel == "max":
+                from voice_enhancer.infrastructure.max_inbox import MaxInboxRow
+
+                conditions = [MaxInboxRow.actor_id == user_id]
+                if before_timestamp is not None:
+                    conditions.append(MaxInboxRow.event_timestamp <= before_timestamp)
+                # A retry of an older upload must not recreate deleted media.
+                await session.execute(
+                    update(MaxInboxRow).where(*conditions).values(status="done", payload=None, actor_id=None)
+                )
             await session.execute(
-                delete(AnalyticsEventRow).where(AnalyticsEventRow.telegram_user_id == user_id)
+                delete(AnalyticsEventRow).where(
+                    AnalyticsEventRow.telegram_user_id == user_id,
+                    AnalyticsEventRow.channel == channel,
+                )
             )
             job_ids = list(
-                await session.scalars(select(JobRow.id).where(JobRow.telegram_user_id == user_id))
+                await session.scalars(
+                    select(JobRow.id).where(
+                        JobRow.telegram_user_id == user_id, JobRow.channel == channel
+                    )
+                )
             )
             for job_id in job_ids:
                 session.add(DeletedMediaRow(job_id=job_id))
@@ -278,7 +355,13 @@ class JobStore:
             )
 
     async def queue_for_preset(
-        self, job_id: str, user_id: int, preset: str, status_message_id: int | None = None
+        self,
+        job_id: str,
+        user_id: int,
+        preset: str,
+        status_message_id: int | str | None = None,
+        *,
+        channel: str = "telegram",
     ) -> bool:
         async with self.sessions.begin() as session:
             result = await session.execute(
@@ -286,12 +369,16 @@ class JobStore:
                 .where(
                     JobRow.id == job_id,
                     JobRow.telegram_user_id == user_id,
+                    JobRow.channel == channel,
                     JobRow.status == JobStatus.CREATED.value,
                 )
                 .values(
                     status=JobStatus.QUEUED.value,
                     preset=preset,
-                    status_message_id=status_message_id,
+                    status_message_id=status_message_id if channel == "telegram" else None,
+                    external_status_id=str(status_message_id)
+                    if status_message_id is not None
+                    else None,
                     updated_at=utcnow(),
                 )
             )
@@ -319,6 +406,7 @@ class JobStore:
         output_path: Path | None = None,
         error_code: str | None = None,
         result_message_id: int | None = None,
+        external_result_id: str | None = None,
     ) -> bool:
         if target not in TRANSITIONS[expected]:
             raise ValueError(f"Invalid job transition: {expected} -> {target}")
@@ -327,6 +415,8 @@ class JobStore:
             values["output_path"] = str(output_path)
         if error_code is not None:
             values["error_code"] = error_code
+        if external_result_id is not None:
+            values["external_result_id"] = external_result_id
         if result_message_id is not None:
             values["result_message_id"] = result_message_id
         async with self.sessions.begin() as session:

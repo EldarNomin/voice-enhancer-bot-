@@ -1,5 +1,6 @@
 import asyncio
 import shutil
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -88,7 +89,9 @@ class ElevenLabsVoiceIsolatorProvider:
                                 async for chunk in response.aiter_bytes():
                                     output.write(chunk)
                     if output_path.stat().st_size == 0:
-                        raise RetryableProviderError("ElevenLabs audio isolation returned an empty file")
+                        raise RetryableProviderError(
+                            "ElevenLabs audio isolation returned an empty file"
+                        )
                     return EnhancementResult(
                         output_path, "elevenlabs-voice-isolator", time.monotonic() - started
                     )
@@ -155,16 +158,62 @@ class DeepFilterNetProvider:
         return EnhancementResult(output_path, "deepfilternet", time.monotonic() - started)
 
 
+class GTCRNProvider:
+    """Optional CPU/16 kHz denoiser, isolated so cancellation stops native inference."""
+
+    def __init__(self, model_path: str, *, timeout_seconds: int = 1200) -> None:
+        if not Path(model_path).is_file():
+            raise ValueError("Install the pinned GTCRN model and set GTCRN_MODEL")
+        self.model_path = model_path
+        self.timeout_seconds = timeout_seconds
+
+    async def enhance(
+        self, input_path: Path, *, profile: ProcessingProfile, output_path: Path
+    ) -> EnhancementResult:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.unlink(missing_ok=True)
+        started = time.monotonic()
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "voice_enhancer.infrastructure.gtcrn_cli",
+            str(input_path),
+            str(output_path),
+            self.model_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            await asyncio.wait_for(process.wait(), timeout=self.timeout_seconds)
+        except (TimeoutError, asyncio.CancelledError) as error:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            await process.wait()
+            output_path.unlink(missing_ok=True)
+            if isinstance(error, TimeoutError):
+                raise ProviderError("GTCRN timed out") from error
+            raise
+        if process.returncode != 0 or not output_path.is_file() or not output_path.stat().st_size:
+            output_path.unlink(missing_ok=True)
+            raise ProviderError("GTCRN failed; check optional dependencies and model checksum")
+        return EnhancementResult(output_path, "gtcrn", time.monotonic() - started)
+
+
 def select_provider(
     name: str,
     *,
     elevenlabs_api_key: str = "",
     deepfilter_bin: str = "deep-filter",
+    gtcrn_model: str = "/opt/models/gtcrn_simple.onnx",
 ) -> SpeechEnhancementProvider:
     if name == "ffmpeg":
         return PassthroughProvider()
     if name == "elevenlabs":
         return ElevenLabsVoiceIsolatorProvider(elevenlabs_api_key)
+    if name == "gtcrn":
+        return GTCRNProvider(gtcrn_model)
     if name == "deepfilter":
         return DeepFilterNetProvider(deepfilter_bin)
     raise ValueError(f"Unsupported enhancement provider: {name}")

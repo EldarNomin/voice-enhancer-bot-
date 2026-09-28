@@ -111,6 +111,7 @@ async def prepare(
                 provider_name,
                 elevenlabs_api_key=settings.elevenlabs_api_key,
                 deepfilter_bin=deepfilter_bin or settings.deepfilter_bin,
+                gtcrn_model=settings.gtcrn_model,
             )
             processed = await MediaProcessingService(ffmpeg, provider).process(
                 run_source, kind=kind, profile=profile
@@ -264,7 +265,7 @@ def main() -> None:
     prepare_cmd.add_argument(
         "--providers",
         nargs="+",
-        choices=("ffmpeg", "deepfilter", "elevenlabs"),
+        choices=("ffmpeg", "deepfilter", "gtcrn", "elevenlabs"),
         default=["ffmpeg", "deepfilter"],
     )
     prepare_cmd.add_argument("--preset", type=Preset, choices=list(Preset), default=Preset.STUDIO)
