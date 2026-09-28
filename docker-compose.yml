@@ -5,21 +5,7 @@ services:
     environment:
       TELEGRAM_API_BASE_URL: http://telegram-bot-api:8081
     depends_on:
-      max-ingress:
-    build: .
-    profiles: ["max"]
-    command: ["python", "-m", "voice_enhancer.max_bot"]
-    env_file: .env
-    depends_on:
       init-db:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-    volumes:
-      - media_data:/data/media
-    restart: unless-stopped
-
-  init-db:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -46,6 +32,20 @@ services:
     volumes:
       - media_data:/data/media
       - telegram_data:/var/lib/telegram-bot-api:ro
+    restart: unless-stopped
+
+  max-ingress:
+    build: .
+    profiles: ["max"]
+    command: ["python", "-m", "voice_enhancer.max_bot"]
+    env_file: .env
+    depends_on:
+      init-db:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    volumes:
+      - media_data:/data/media
     restart: unless-stopped
 
   init-db:

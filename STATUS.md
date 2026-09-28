@@ -53,3 +53,8 @@ comparison later. Without an ElevenLabs key or human listening ratings, no unive
 quality winner is claimed. Resemble's public demo rejected inference for exhausted
 GPU quota; it has no result in the comparison. GLM payment is not a dependency for
 preset-based processing in either messenger.
+
+Validation of the 2026-09-28 update: 85 local tests passed, 2 service tests skipped
+locally. CI Python 3.13 passed all 87 tests with real PostgreSQL/Redis. Its Compose
+validation caught a YAML indentation error, corrected before deployment; the final
+CI run is the authoritative build gate.
