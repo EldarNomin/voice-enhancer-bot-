@@ -24,7 +24,16 @@ class FakeFFmpeg:
 
 
 @pytest.mark.asyncio
-async def test_video_processing_extracts_enhances_and_remuxes(tmp_path: Path) -> None:
+async def test_video_processing_extracts_enhances_and_remuxes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    clock = iter([10.0, 12.5])
+    monkeypatch.setattr(
+        "voice_enhancer.application.processing.time",
+        SimpleNamespace(monotonic=lambda: next(clock)),
+    )
     ffmpeg = FakeFFmpeg()
     service = MediaProcessingService(ffmpeg)  # type: ignore[arg-type]
     result = await service.process(
@@ -33,7 +42,8 @@ async def test_video_processing_extracts_enhances_and_remuxes(tmp_path: Path) ->
     assert ffmpeg.extracted and ffmpeg.remuxed
     assert result.output_path.name == "enhanced.mp4"
     assert result.provider == "ffmpeg-dsp-baseline"
-    assert result.compute_seconds == 1.25
+    # Includes extraction and remuxing, not just the provider's reported 1.25s.
+    assert result.compute_seconds == 2.5
 
 
 @pytest.mark.asyncio
@@ -45,3 +55,43 @@ async def test_audio_processing_normalizes_and_does_not_remux(tmp_path: Path) ->
     )
     assert ffmpeg.extracted and not ffmpeg.remuxed
     assert result.output_path.name == "enhanced.m4a"
+
+
+@pytest.mark.asyncio
+async def test_near_silent_ai_result_falls_back_to_original_signal(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from voice_enhancer.application.media_validation import MediaKind
+    from voice_enhancer.application.processing import MediaProcessingService
+    from voice_enhancer.domain.profile import Preset, profile_for
+    from voice_enhancer.infrastructure.providers import EnhancementResult
+
+    processor = AsyncMock()
+    provider = AsyncMock()
+    source = tmp_path / "source.wav"
+    provider.enhance.return_value = EnhancementResult(
+        tmp_path / "work" / "isolated.audio", "deepfilternet", 1.0
+    )
+    monkeypatch.setattr("voice_enhancer.application.processing.measure_sample_peak",
+                        AsyncMock(side_effect=[-31.2, -85.0]))
+    result = await MediaProcessingService(processor, provider).process(
+        source, kind=MediaKind.AUDIO, profile=profile_for(Preset.NATURAL))
+    assert result.provider == "deepfilternet-fallback-ffmpeg"
+    assert processor.enhance_audio.call_args.args[0] == tmp_path / "work" / "voice.wav"
+    assert processor.enhance_audio.call_args.kwargs.get("denoise", True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["deepfilternet", "gtcrn", "elevenlabs-voice-isolator"])
+async def test_successful_ai_does_not_repeat_noise_suppression(tmp_path, monkeypatch, name):
+    from unittest.mock import AsyncMock
+
+    processor = AsyncMock()
+    provider = AsyncMock()
+    provider.enhance.return_value = EnhancementResult(tmp_path / "isolated.wav", name, 1.0)
+    monkeypatch.setattr("voice_enhancer.application.processing.measure_sample_peak",
+                        AsyncMock(side_effect=[-10.0, -12.0]))
+    await MediaProcessingService(processor, provider).process(
+        tmp_path / "source.wav", kind=MediaKind.AUDIO, profile=profile_for(Preset.NATURAL)
+    )
+    assert processor.enhance_audio.call_args.kwargs == {"denoise": False}

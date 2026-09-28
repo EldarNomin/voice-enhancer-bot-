@@ -23,6 +23,12 @@ from voice_enhancer.config import settings
 from voice_enhancer.domain.job import JobStatus
 from voice_enhancer.domain.profile import Preset
 from voice_enhancer.i18n import normalize_locale, tr
+from voice_enhancer.infrastructure.admission import (
+    AdmissionRejected,
+    BoundedWriter,
+    require_disk_space,
+    upload_slot,
+)
 from voice_enhancer.infrastructure.cleanup import cleanup_deleted_media
 from voice_enhancer.infrastructure.database import JobStore, make_engine
 from voice_enhancer.infrastructure.ffmpeg import FFmpegProcessor
@@ -149,6 +155,16 @@ async def request_new_file(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("r:"))
 async def reprocess_original(callback: CallbackQuery, store: JobStore) -> None:
+    try:
+        with upload_slot(Path(settings.media_root), "telegram", callback.from_user.id,
+                         settings.max_media_size_bytes):
+            await _reprocess_original(callback, store)
+    except AdmissionRejected as error:
+        locale = normalize_locale(callback.from_user.language_code)
+        await callback.answer(tr(locale, error.code), show_alert=True)
+
+
+async def _reprocess_original(callback: CallbackQuery, store: JobStore) -> None:
     locale = normalize_locale(callback.from_user.language_code)
     if callback.data is None:
         return
@@ -164,8 +180,12 @@ async def reprocess_original(callback: CallbackQuery, store: JobStore) -> None:
         return
     job_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{original_id}:{callback.id}").hex
     target_dir = media_root / job_id
+    owns_directory = False
     try:
+        await store.check_capacity("telegram", callback.from_user.id)
+        require_disk_space(media_root, source.stat().st_size)
         target_dir.mkdir()
+        owns_directory = True
         target = target_dir / source.name
         try:
             os.link(source, target)
@@ -178,6 +198,11 @@ async def reprocess_original(callback: CallbackQuery, store: JobStore) -> None:
             shutil.rmtree(target_dir)
             await callback.answer(tr(locale, "reprocess_unavailable"), show_alert=True)
             return
+    except AdmissionRejected as error:
+        if owns_directory:
+            shutil.rmtree(target_dir)
+        await callback.answer(tr(locale, error.code), show_alert=True)
+        return
     except FileExistsError:
         await callback.answer(tr(locale, "reprocess_unavailable"), show_alert=True)
         return
@@ -203,6 +228,22 @@ async def reprocess_original(callback: CallbackQuery, store: JobStore) -> None:
 
 @router.message(F.video | F.audio | F.voice | F.document)
 async def receive_media(message: Message, bot: Bot, store: JobStore) -> None:
+    if message.from_user is None:
+        return
+    locale = normalize_locale(message.from_user.language_code)
+    try:
+        with upload_slot(Path(settings.media_root), "telegram", message.from_user.id,
+                         settings.max_media_size_bytes):
+            await store.check_capacity("telegram", message.from_user.id)
+            async with asyncio.timeout(1800):
+                await _receive_media(message, bot, store)
+    except AdmissionRejected as error:
+        await message.answer(tr(locale, error.code))
+    except TimeoutError:
+        await message.answer(tr(locale, "read_error"))
+
+
+async def _receive_media(message: Message, bot: Bot, store: JobStore) -> None:
     if message.from_user is None:
         return
     locale = normalize_locale(message.from_user.language_code)
@@ -242,7 +283,8 @@ async def receive_media(message: Message, bot: Bot, store: JobStore) -> None:
     with tempfile.TemporaryDirectory(prefix="incoming-", dir=media_root) as temp:
         downloaded = Path(temp) / f"source{suffix}"
         try:
-            await bot.download(telegram_file, destination=downloaded, timeout=3600)
+            with BoundedWriter(downloaded, settings.max_media_size_bytes) as output:
+                await bot.download(telegram_file, destination=output, timeout=1800)
             info = await ffmpeg.probe(downloaded)
             streams = info.get("streams", [])
             metadata = MediaMetadata(
@@ -273,6 +315,10 @@ async def receive_media(message: Message, bot: Bot, store: JobStore) -> None:
                 shutil.rmtree(target_dir)
                 await message.answer(tr(locale, "duplicate_file"))
                 return
+        except AdmissionRejected:
+            if target_dir.exists():
+                shutil.rmtree(target_dir)
+            raise
         except MediaValidationError as error:
             await _track(
                 store,

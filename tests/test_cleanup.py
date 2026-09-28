@@ -25,7 +25,13 @@ async def test_source_and_result_have_distinct_retention_windows(tmp_path: Path)
         folder = root / job_id
         folder.mkdir(parents=True)
         source = folder / "source.ogg"
-        result = folder / "enhanced.m4a"
+        work = folder / "work"
+        work.mkdir()
+        result = work / "enhanced.m4a"
+        extracted = work / "voice.wav"
+        isolated = work / "isolated.audio"
+        extracted.write_bytes(b"unprocessed speech")
+        isolated.write_bytes(b"isolated speech")
         source.write_bytes(b"input")
         result.write_bytes(b"output")
         await store.create_pending(
@@ -43,11 +49,13 @@ async def test_source_and_result_have_distinct_retention_windows(tmp_path: Path)
                 .where(JobRow.id == job_id)
                 .values(
                     status=JobStatus.COMPLETED.value,
+                    output_path=str(result),
                     updated_at=now - timedelta(hours=25),
                 )
             )
         await cleanup_media(store, root, now)
         assert not source.exists() and result.exists()
+        assert not extracted.exists() and not isolated.exists()
         async with store.sessions.begin() as session:
             await session.execute(
                 update(JobRow)

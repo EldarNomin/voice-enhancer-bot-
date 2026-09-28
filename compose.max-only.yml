@@ -1,0 +1,16 @@
+# Usage: docker compose -f docker-compose.yml -f compose.max-only.yml --profile max up -d
+# Compose >= 2.24.4 supports !override.
+services:
+  bot:
+    profiles: ["telegram"]
+  telegram-bot-api:
+    profiles: ["telegram"]
+  worker:
+    depends_on: !override
+      init-db:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      BOT_TOKEN: ""
+      TELEGRAM_API_BASE_URL: ""

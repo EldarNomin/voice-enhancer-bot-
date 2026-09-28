@@ -1,5 +1,7 @@
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -95,7 +97,7 @@ async def test_deepfilter_collects_cli_output(tmp_path: Path, monkeypatch: pytes
     incoming.write_bytes(b"audio")
 
     async def fake_exec(*args, **kwargs):
-        output_dir = Path(args[args.index("--output-dir") + 1])
+        output_dir = Path(args[args.index("-o") + 1])
         (output_dir / incoming.name).write_bytes(b"enhanced")
 
         async def wait():
@@ -111,3 +113,55 @@ async def test_deepfilter_collects_cli_output(tmp_path: Path, monkeypatch: pytes
     assert output.read_bytes() == b"enhanced"
     assert result.provider_name == "deepfilternet"
     assert not list(tmp_path.glob("deepfilter-*"))
+
+
+@pytest.mark.asyncio
+async def test_deepfilter_cancellation_stops_child_process(tmp_path, monkeypatch) -> None:
+    entered = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def wait():
+        entered.set()
+        await stopped.wait()
+
+    process = SimpleNamespace(wait=wait, kill=Mock(side_effect=stopped.set))
+    monkeypatch.setattr(
+        "voice_enhancer.infrastructure.providers.asyncio.create_subprocess_exec",
+        AsyncMock(return_value=process),
+    )
+    task = asyncio.create_task(DeepFilterNetProvider().enhance(
+        tmp_path / "source.wav", profile=profile_for(Preset.NATURAL),
+        output_path=tmp_path / "result.audio",
+    ))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    process.kill.assert_called_once()
+    assert stopped.is_set()
+
+
+@pytest.mark.asyncio
+async def test_gtcrn_cancellation_kills_native_inference(tmp_path, monkeypatch) -> None:
+    from voice_enhancer.infrastructure.providers import GTCRNProvider
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"model")
+    entered, stopped = asyncio.Event(), asyncio.Event()
+
+    async def wait():
+        entered.set()
+        await stopped.wait()
+
+    process = SimpleNamespace(wait=wait, kill=Mock(side_effect=stopped.set))
+    monkeypatch.setattr("voice_enhancer.infrastructure.providers.asyncio.create_subprocess_exec",
+                        AsyncMock(return_value=process))
+    task = asyncio.create_task(GTCRNProvider(str(model)).enhance(
+        tmp_path / "source.wav", profile=profile_for(Preset.NATURAL),
+        output_path=tmp_path / "result.audio"))
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    process.kill.assert_called_once()
+    assert stopped.is_set()

@@ -26,6 +26,43 @@ def _binaries() -> tuple[str, str]:
 
 
 @pytest.mark.asyncio
+async def test_delayed_audio_keeps_its_position_and_full_video(tmp_path: Path) -> None:
+    import array
+
+    ffmpeg_bin, ffprobe_bin = _binaries()
+    processor = FFmpegProcessor(ffmpeg_bin, ffprobe_bin)
+    source = tmp_path / "delayed.mp4"
+    await processor._run(
+        ffmpeg_bin, "-v", "error", "-y", "-f", "lavfi", "-i",
+        "color=c=blue:s=320x240:r=25:d=2", "-itsoffset", "0.5", "-f", "lavfi", "-i",
+        "sine=frequency=440:sample_rate=48000:duration=1", "-map", "0:v:0",
+        "-map", "1:a:0", "-c:v", "mpeg4", "-c:a", "aac", str(source),
+    )
+    result = await MediaProcessingService(processor).process(
+        source, kind=MediaKind.VIDEO, profile=profile_for(Preset.NATURAL)
+    )
+    checks = await check_media(processor, source, result.output_path, MediaKind.VIDEO)
+    assert abs(checks["duration_seconds"] - 2) < 0.05
+    pcm = tmp_path / "decoded.pcm"
+    await processor._run(
+        ffmpeg_bin, "-v", "error", "-y", "-i", str(result.output_path), "-vn",
+        "-ac", "1", "-ar", "48000", "-f", "f32le", str(pcm),
+    )
+    samples = array.array("f", pcm.read_bytes())
+    if sys.byteorder != "little":
+        samples.byteswap()
+    first_signal = next(i for i, value in enumerate(samples) if abs(value) > 0.01)
+    assert 0.45 < first_signal / 48000 < 0.55
+    hashes = []
+    for media in (source, result.output_path):
+        hashes.append(await processor._run(
+            ffmpeg_bin, "-v", "error", "-i", str(media), "-map", "0:v:0",
+            "-c", "copy", "-f", "hash", "-hash", "sha256", "-",
+        ))
+    assert hashes[0] == hashes[1]
+
+
+@pytest.mark.asyncio
 async def test_process_timeout_stops_child() -> None:
     processor = FFmpegProcessor(timeout_seconds=0.01)
     with pytest.raises(FFmpegError, match="timed out"):
@@ -304,3 +341,60 @@ async def test_supported_video_inputs_remux_and_process(
     )
     checks = await check_media(processor, source, result.output_path, MediaKind.VIDEO)
     assert checks["video_preserved"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("denoise", [True, False])
+async def test_dsp_does_not_delay_speech_or_discard_tail(tmp_path: Path, denoise: bool) -> None:
+    """Regression for the 25 ms afftdn hop delay found with real paired speech."""
+    import array
+    import math
+    import wave
+
+    ffmpeg_bin, ffprobe_bin = _binaries()
+    processor = FFmpegProcessor(ffmpeg_bin, ffprobe_bin)
+    source = tmp_path / "chirp.wav"
+    sr = 48000
+    # Nonperiodic voiced signal; phase slope changes so the lag is unambiguous.
+    original = array.array("h", [int(8000 * math.sin(
+        2 * math.pi * (180 * i / sr + 1700 * (i / sr) ** 2)
+    )) for i in range(sr)])
+    if sys.byteorder != "little":
+        original.byteswap()
+    with wave.open(str(source), "wb") as output:
+        output.setparams((1, 2, sr, 0, "NONE", "not compressed"))
+        output.writeframes(original.tobytes())
+    result = tmp_path / "result.m4a"
+    await processor.enhance_audio(source, result, profile_for(Preset.NATURAL), denoise=denoise)
+    decoded = tmp_path / "decoded.pcm"
+    await processor._run(ffmpeg_bin, "-v", "error", "-y", "-i", str(result),
+                         "-ar", str(sr), "-ac", "1", "-f", "f32le", str(decoded))
+    values = array.array("f", decoded.read_bytes())
+    if sys.byteorder != "little":
+        original.byteswap()
+        values.byteswap()
+    # Search +/- 40 ms using sparse reference samples from the middle of the clip.
+    correlations = {lag: abs(sum(original[i] * values[i+lag]
+                                 for i in range(sr//3, 2*sr//3, 16)))
+                    for lag in range(-1920, 1921)}
+    best_lag = max(correlations, key=correlations.get)
+    assert abs(best_lag) <= 48  # <= 1 ms, including filter phase/group delay.
+    assert sum(x*x for x in values[sr-480:sr]) / 480 > 1e-4
+
+
+@pytest.mark.asyncio
+async def test_gtcrn_runs_in_real_common_pipeline(tmp_path: Path, monkeypatch) -> None:
+    model = os.getenv("GTCRN_MODEL")
+    if not model or not Path(model).is_file():
+        pytest.skip("Optional GTCRN model is not configured")
+    monkeypatch.setattr(settings, "gtcrn_model", model)
+    ffmpeg_bin, ffprobe_bin = _binaries()
+    source = tmp_path / "voice.wav"
+    processor = FFmpegProcessor(ffmpeg_bin, ffprobe_bin)
+    await processor._run(ffmpeg_bin, "-v", "error", "-y", "-f", "lavfi", "-i",
+                         "sine=frequency=440:sample_rate=48000:duration=2", str(source))
+    output = tmp_path / "enhanced.m4a"
+    result = await process_file(source, output, preset=Preset.NATURAL, provider_name="gtcrn",
+                                ffmpeg_bin=ffmpeg_bin, ffprobe_bin=ffprobe_bin)
+    assert result["provider"] == "gtcrn"
+    assert abs(result["quality_checks"]["duration_drift_ms"]) < 50

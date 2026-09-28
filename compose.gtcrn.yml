@@ -1,0 +1,8 @@
+services:
+  worker:
+    build:
+      context: .
+      target: gtcrn
+    environment:
+      ENHANCEMENT_PROVIDER: gtcrn
+      GTCRN_MODEL: /opt/models/gtcrn_simple.onnx

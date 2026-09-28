@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "voice-enhancer-bot"
 version = "0.1.0"
-description = "Telegram bot that improves speech in video and audio"
+description = "Telegram and MAX bot that improves speech in video and audio"
 requires-python = ">=3.12"
 dependencies = [
   "aiogram>=3.13,<4",
@@ -19,6 +19,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gtcrn = ["sherpa-onnx==1.13.8", "sherpa-onnx-core==1.13.8", "numpy==2.5.3", "soundfile==0.14.0", "cffi==2.1.0", "pycparser==3.0"]
+benchmark = ["numpy>=2,<3", "scipy>=1.14,<2", "soundfile>=0.13,<1", "pystoi==0.4.1"]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.6", "aiosqlite>=0.20"]
 
 [tool.hatch.build.targets.wheel]

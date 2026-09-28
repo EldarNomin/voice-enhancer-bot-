@@ -1,5 +1,7 @@
 # Voice Enhancer Bot
 
+Windows: [setup, offline test, start and safe diagnostics](docs/WINDOWS.md).
+
 Telegram bot for improving speech in short videos and audio, based on [`SPEC.md`](SPEC.md).
 
 Progress against the MVP acceptance criteria is tracked in [`STATUS.md`](STATUS.md).
@@ -19,6 +21,8 @@ The default processing engine is a local FFmpeg DSP baseline. Optional ElevenLab
 Requirements: Docker Compose, a Telegram bot token, and Telegram API ID/hash for the local Bot API server. Set `BOT_TOKEN`, `TELEGRAM_API_ID`, and `TELEGRAM_API_HASH` in `.env`. API ID/hash come from [my.telegram.org](https://my.telegram.org). Other settings and defaults are listed in `src/voice_enhancer/config.py`.
 
 ```bash
+cp .env.example .env
+# Fill in Telegram credentials, then:
 docker compose up --build
 ```
 
@@ -26,9 +30,19 @@ If this bot token was previously used with Telegram's cloud Bot API, call its `l
 
 To compare the ElevenLabs isolation stage, set `ENHANCEMENT_PROVIDER=elevenlabs` and `ELEVENLABS_API_KEY` in `.env`. This sends the uploaded audio to ElevenLabs and may incur provider charges. Temporary HTTP errors are retried with bounded backoff. Keep `ENHANCEMENT_PROVIDER=ffmpeg` for the local baseline. Selection for users should follow the blind listening benchmark in `SPEC.md`.
 
+For a local AI engine without per-minute API fees, use the optional DeepFilterNet worker image:
+
+```bash
+docker compose -f docker-compose.yml -f compose.deepfilter.yml up --build -d
+```
+
+This selects DeepFilterNet only for the worker and installs the official 0.5.6 binary with a pinned SHA-256. Linux AMD64 and ARM64 artifacts are configured; AMD64 has been exercised locally, ARM64 still needs runtime testing. The build needs GitHub access. No GLM or ElevenLabs key is required. Hosting and CPU time still cost money. The standard Compose command retains the FFmpeg baseline.
+
+See [`docs/ARCHITECTURE_REVIEW.md`](docs/ARCHITECTURE_REVIEW.md) for design decisions, verification and the remaining release gates. Runtime Python dependencies are pinned in `requirements.lock`; update deliberately with `uv pip compile pyproject.toml -o requirements.lock` and rerun tests.
+
 ## Offline listening benchmark
 
-This benchmark does not require Telegram credentials. Install FFmpeg and ffprobe locally, and collect at least 20 licensed or self-recorded clips in `media/corpus/` covering the recording conditions in `SPEC.md`. Media under `media/` is ignored by Git. For the local comparison, download the official [DeepFilterNet binary](https://github.com/Rikorose/DeepFilterNet/releases) and put `deep-filter` on `PATH`, or set `DEEPFILTER_BIN` to its executable path. The optional Python package CLI (`deepFilter`) also accepts the same command flags. The Docker image does not include DeepFilterNet.
+This benchmark does not require Telegram credentials. Install FFmpeg and ffprobe locally, and collect at least 20 licensed or self-recorded clips in `media/corpus/` covering the recording conditions in `SPEC.md`. Media under `media/` is ignored by Git. For the local comparison, download the official [DeepFilterNet binary](https://github.com/Rikorose/DeepFilterNet/releases) and put `deep-filter` on `PATH`, or set `DEEPFILTER_BIN` to its executable path. The supported adapter targets the Rust binary; the Python CLI is not verified. On supported Linux machines, `python scripts/install_deepfilter.py /your/path/deep-filter` installs the pinned version. The optional Docker build above includes this binary.
 
 To reproduce the first public-corpus smoke test, run `python scripts/fetch_public_corpus.py`. It fetches 20 noisy-speech rows from the [Speech and Noise Dataset](https://huggingface.co/datasets/haydarkadioglu/speech-noise-dataset), whose card declares CC0, and records row indices and SHA-256 hashes in `media/corpus/corpus_manifest.json`. This is a preliminary English audio-only sample without verified labels for every SPEC recording condition; review source rights before redistributing the files or using them for commercial training. The current prepared local test is in `media/benchmark_public_v1/`.
 
@@ -61,7 +75,7 @@ Open `http://localhost:8080/health` to check the API container. Bot and worker r
 Run tests locally:
 
 ```bash
-python -m pip install -e '.[dev]'
+python -m pip install -c requirements.lock -e '.[dev]'
 pytest
 ```
 
@@ -77,6 +91,8 @@ FFmpeg applies a conservative DSP chain for the current vertical slice. This is 
 
 Files waiting for a preset expire after 30 minutes; completed originals expire after 24 hours and completed results after 72 hours.
 
+Intermediate WAV/provider files are removed with the original at 24 hours; only the result is kept for 72 hours. This applies to the application media volume. Telegram's separate local Bot API cache and copies already delivered in chats have a separate lifecycle; `/delete_my_data` does not erase Telegram messages or that cache. Cleanup retries filesystem failures. Run only one worker on one shared Linux filesystem; an OS lock enforces this for the same media volume. This is not a distributed multi-host worker design.
+
 ## Project layout
 
 ```text
@@ -89,3 +105,13 @@ src/voice_enhancer/
   worker.py        queued processing and result delivery
 tests/
 ```
+
+
+## MAX (РФ)
+
+Поддерживаются Telegram и MAX с общей очередью и движком обработки. MAX — опциональный
+канал: webhook → PostgreSQL inbox → обработчик сообщений → общая очередь → media worker.
+Токены и права пользователей разделены по каналам. Есть вариант запуска только MAX.
+Подробная настройка, ограничения и проверка: [docs/MAX.md](docs/MAX.md).
+
+Сравнение локальных движков на открытой речи: [docs/AUDIO_COMPARISON.md](docs/AUDIO_COMPARISON.md).

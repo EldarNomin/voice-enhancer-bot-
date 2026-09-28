@@ -36,6 +36,18 @@ async def cleanup_media(store: JobStore, root: Path, now: datetime | None = None
             source = Path(job.source_path).resolve()
             if source.parent == folder:
                 source.unlink(missing_ok=True)
+            # Extracted WAV and provider output also contain the original speech.
+            # Keep only the delivered result through the 72-hour result window.
+            result = Path(job.output_path).resolve() if job.output_path else None
+            work = folder / "work"
+            if work.is_dir() and not work.is_symlink():
+                for path in work.iterdir():
+                    if path.resolve() == result:
+                        continue
+                    if path.is_dir() and not path.is_symlink():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink(missing_ok=True)
 
 
 async def cleanup_deleted_media(store: JobStore, root: Path) -> None:
